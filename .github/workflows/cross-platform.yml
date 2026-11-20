@@ -1,0 +1,38 @@
+name: VeilPNG native build and smoke test
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install VeilPNG and packager
+        run: python -m pip install -e '.[full,build]'
+      - name: Compile source
+        run: python -m compileall -q veilpng
+      - name: Check dependencies
+        run: python -m veilpng doctor
+      - name: Launch headless GUI
+        run: python -m veilpng.gui --smoke-test
+      - name: Build platform-native portable app
+        run: python scripts/build_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VeilPNG-${{ matrix.os }}
+          path: artifacts/*
+          if-no-files-found: error
