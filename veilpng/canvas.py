@@ -5,7 +5,7 @@ import math
 import zlib
 
 from PIL import Image, ImageDraw
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer
 from PySide6.QtGui import (
     QBrush, QColor, QImage, QPainter, QPainterPath, QPen, QPixmap,
 )
@@ -28,6 +28,7 @@ def _pixmap(img: Image.Image) -> QPixmap:
 class MaskCanvas(QGraphicsView):
     changed = Signal()
     mouse_info = Signal(str)
+    zoom_changed = Signal(float)
     TOOLS = ("brush", "erase", "rect", "lasso", "polygon", "pan")
 
     def __init__(self, parent=None):
@@ -62,6 +63,9 @@ class MaskCanvas(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setMouseTracking(True)
+        self._paint_redraw_timer = QTimer(self)
+        self._paint_redraw_timer.setSingleShot(True)
+        self._paint_redraw_timer.timeout.connect(self._refresh_overlay)
 
     def set_document(self, image: Image.Image, mask: Image.Image | None = None):
         self.original = image.convert("RGBA")
@@ -75,6 +79,7 @@ class MaskCanvas(QGraphicsView):
         self.scene_obj.setSceneRect(0, 0, image.width, image.height)
         self.resetTransform()
         self.fitInView(self.scene_obj.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.zoom_changed.emit(self.transform().m11())
         self.changed.emit()
 
     def set_tool(self, tool: str):
@@ -188,7 +193,10 @@ class MaskCanvas(QGraphicsView):
         d.line((previous[0], previous[1], current[0], current[1]), fill=color, width=max(1, self.brush_size))
         for x, y in (previous, current):
             d.ellipse((x-r, y-r, x+r, y+r), fill=color)
-        self._refresh_overlay()
+        # Full bitmap conversion is expensive on multi-megapixel pages.
+        # Coalesce pointer moves; the final stroke is rendered immediately on release.
+        if not self._paint_redraw_timer.isActive():
+            self._paint_redraw_timer.start(35)
 
     def _clear_temp(self):
         if self.temp_item is not None:
@@ -296,6 +304,7 @@ class MaskCanvas(QGraphicsView):
         self.drawing = False
         self.points = []
         self._clear_temp()
+        self._paint_redraw_timer.stop()
         self._refresh_overlay()
         self.changed.emit()
         event.accept()
@@ -327,11 +336,14 @@ class MaskCanvas(QGraphicsView):
         zoom = self.transform().m11() * factor
         if 0.03 <= zoom <= 16:
             self.scale(factor, factor)
+            self.zoom_changed.emit(self.transform().m11())
         event.accept()
 
     def zoom_fit(self):
         if self.original is not None:
             self.fitInView(self.scene_obj.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+            self.zoom_changed.emit(self.transform().m11())
 
     def zoom_one(self):
         self.resetTransform()
+        self.zoom_changed.emit(self.transform().m11())

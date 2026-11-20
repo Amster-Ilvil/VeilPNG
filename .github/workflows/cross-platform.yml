@@ -1,13 +1,16 @@
-name: VeilPNG native build and smoke test
+name: VeilPNG cross-platform validation and portable packaging
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, master]
+    tags: ['v*']
   pull_request:
+
 permissions:
   contents: read
+
 jobs:
-  build:
+  test-and-build:
     strategy:
       fail-fast: false
       matrix:
@@ -21,15 +24,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install VeilPNG and packager
-        run: python -m pip install -e '.[full,build]'
-      - name: Compile source
-        run: python -m compileall -q veilpng
-      - name: Check dependencies
+      - name: Install dependencies
+        run: python -m pip install -U pip "setuptools>=68" wheel
+      - name: Install VeilPNG with GUI, CV, tests and PyInstaller
+        run: python -m pip install -e ".[full,test,build]"
+      - name: Core and registration tests
+        run: python -m pytest -q
+      - name: Platform doctor
         run: python -m veilpng doctor
-      - name: Launch headless GUI
+      - name: GUI smoke test on Linux virtual display
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m veilpng.gui --smoke-test
+      - name: GUI smoke test on Windows/macOS
+        if: runner.os != 'Linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: python -m veilpng.gui --smoke-test
-      - name: Build platform-native portable app
+      - name: Build signed-free portable app on native runner
         run: python scripts/build_release.py
       - uses: actions/upload-artifact@v4
         with:

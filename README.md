@@ -1,4 +1,4 @@
-# VeilPNG v0.4.0
+# VeilPNG v0.4.1
 
 VeilPNG is a local-first dual-layer PNG privacy editor built with Python and PySide6.
 It shows a censored preview in ordinary image viewers while storing the original
@@ -14,7 +14,10 @@ file encrypted in a private ancillary PNG chunk (AES-256-GCM + Argon2id).
 - Merge authorized visible edits into a new encrypted original (A2).
 - Register differing image resolutions and transfer region masks through an
   external 3x3 registration matrix manifest (optional, supplied by the user).
-- GUI inspired by a blue-and-white, three-pane studio layout.
+- GUI follows a blue-and-white workstation layout with separate protection and
+  AI/registration tabs, plus optional side-by-side public-preview comparison.
+- Canvas-focused tool shortcuts: B brush, E eraser, R rectangle, L lasso,
+  P polygon, H pan. Brush redraws are coalesced for large images.
 
 **Important:** Editing and resaving an encrypted PNG using other applications
 may discard its encrypted chunk. Keep the original container stored safely and
@@ -60,3 +63,9 @@ private PNG chunk when they re-encode the picture.
 ## License
 
 MIT (see LICENSE).
+
+## v0.4.1 changes
+
+Improved GUI navigation and comparison preview, reduced brush redraw overhead
+without changing the encrypted PNG format, and added Linux Qt EGL runtime
+installation to the cross-platform CI workflow.

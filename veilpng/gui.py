@@ -12,10 +12,11 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QColorDialog, QComboBox, QFileDialog, QFrame,
     QGroupBox, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
     QMessageBox, QPushButton, QScrollArea, QSlider, QSpinBox,
-    QSplitter, QStatusBar, QVBoxLayout, QWidget, QLineEdit,
+    QSplitter, QStatusBar, QVBoxLayout, QWidget, QLineEdit, QTabWidget,
+    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
 )
 
-from .canvas import MaskCanvas
+from .canvas import MaskCanvas, _pixmap
 from .gui_theme import STYLESHEET
 from .core import (
     audit_exported_preview, inspect_container, merge_ai_preview, preview_only, repack_preview,
@@ -35,7 +36,7 @@ STYLES = {
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VeilPNG 0.4.0 · 双层加密图像工作站")
+        self.setWindowTitle("VeilPNG 0.4.1 · 双层加密图像工作站")
         self.resize(1360, 880)
         self.original_bytes: bytes | None = None
         self.filename: str = ""
@@ -46,8 +47,13 @@ class MainWindow(QMainWindow):
         self.saved_conceal_mask: Image.Image | None = None
         self.solid_color = DEFAULT_SOLID_COLOR
         self._loading = False
+        self._compare_pending = False
+        self._compare_timer = QTimer(self)
+        self._compare_timer.setSingleShot(True)
+        self._compare_timer.timeout.connect(self._update_compare)
         self.canvas = MaskCanvas()
         self.canvas.changed.connect(self._mask_changed)
+        self.canvas.zoom_changed.connect(self._zoom_changed)
         self.canvas.mouse_info.connect(self._show_mouse_info)
         self.status = QStatusBar()
         self.setStatusBar(self.status)
@@ -62,14 +68,15 @@ class MainWindow(QMainWindow):
             b.setObjectName("primary")
         b.clicked.connect(callback)
         b.setMinimumHeight(36)
+        b.setMinimumWidth(0)
         return b
 
     def _build_ui(self):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setMinimumWidth(305)
-        sidebar.setMaximumWidth(375)
+        sidebar.setMinimumWidth(365)
+        sidebar.setMaximumWidth(445)
         left = QVBoxLayout(sidebar)
         left.setContentsMargins(17, 18, 17, 16)
         left.setSpacing(10)
@@ -83,6 +90,19 @@ class MainWindow(QMainWindow):
         left.addWidget(self._btn("打开原图 / 双层 PNG", self.open_image, primary=True))
         left.addWidget(self._btn("保存为加密双层 PNG", self.save_sealed))
         left.addWidget(self._btn("解密并无损恢复原文件", self.restore_original))
+
+        self.side_tabs = QTabWidget()
+        self.side_tabs.setObjectName("sideTabs")
+        edit_page = QWidget()
+        edit_page.setObjectName("tabPane")
+        tab_layout = QVBoxLayout(edit_page)
+        tab_layout.setContentsMargins(7, 10, 7, 9)
+        tab_layout.setSpacing(10)
+        ai_page = QWidget()
+        ai_page.setObjectName("tabPane")
+        ai_page_layout = QVBoxLayout(ai_page)
+        ai_page_layout.setContentsMargins(7, 10, 7, 9)
+        ai_page_layout.setSpacing(10)
 
         edit_group = QGroupBox("手动选择加密区域")
         edit_layout = QVBoxLayout(edit_group)
@@ -123,9 +143,10 @@ class MainWindow(QMainWindow):
         buttons2.addWidget(self._btn("清空", self.canvas.clear_mask))
         edit_layout.addLayout(buttons2)
         edit_layout.addWidget(self._btn("全图选中", self.canvas.select_all))
-        edit_layout.addWidget(self._btn("配对映射：复制选区到日/中文对应图", self.transfer_to_pair))
-        edit_layout.addWidget(QLabel("使用 Folirina 的真实 pairs.csv 配准矩阵，不进行简单缩放。"))
-        left.addWidget(edit_group)
+        self.finish_roi_btn = self._btn("保存绿色选区并返回", self.toggle_ai_roi, primary=True)
+        self.finish_roi_btn.setVisible(False)
+        edit_layout.addWidget(self.finish_roi_btn)
+        tab_layout.addWidget(edit_group)
 
         preview_group = QGroupBox("表层遮挡设置")
         pv = QVBoxLayout(preview_group)
@@ -136,6 +157,8 @@ class MainWindow(QMainWindow):
         color_row = QHBoxLayout()
         self.color_entry = QLineEdit(self.solid_color)
         self.color_entry.setMaxLength(7)
+        self.color_entry.setMinimumWidth(70)
+        self.color_entry.setMaximumWidth(130)
         self.color_entry.setToolTip("纯色填充必须为 #RRGGBB，不支持半透明")
         self.color_entry.editingFinished.connect(self._color_entry_changed)
         self.color_pick_btn = self._btn("选颜色", self._pick_color)
@@ -153,11 +176,13 @@ class MainWindow(QMainWindow):
         pv.addLayout(block_row)
         self.toggle_preview = QCheckBox("显示公开预览（隐藏红色蒙版）")
         self.toggle_preview.toggled.connect(self.canvas.set_preview)
+        self.toggle_preview.toggled.connect(lambda _v: self._request_compare())
         pv.addWidget(self.toggle_preview)
         self.mask_stat = QLabel("加密面积：0%")
         pv.addWidget(self.mask_stat)
         pv.addWidget(QLabel("纯色不包含原像素；马赛克仍会暴露轮廓。"))
-        left.addWidget(preview_group)
+        tab_layout.addWidget(preview_group)
+        tab_layout.addStretch()
         self._refresh_color_controls()
 
         ai_group = QGroupBox("AI 往返处理")
@@ -176,14 +201,26 @@ class MainWindow(QMainWindow):
         tip.setWordWrap(True)
         tip.setObjectName("muted")
         ai.addWidget(tip)
-        left.addWidget(ai_group)
-        left.addStretch()
+        ai_page_layout.addWidget(ai_group)
+        pair_group = QGroupBox("日中配对遮挡映射")
+        pair_layout = QVBoxLayout(pair_group)
+        pair_layout.addWidget(self._btn("将当前选区映射到对应日/中文图", self.transfer_to_pair))
+        pair_tip = QLabel("读取 Folirina 的 pairs.csv 几何矩阵；不使用简单比例缩放。映射后请检查边界。")
+        pair_tip.setWordWrap(True)
+        pair_tip.setObjectName("muted")
+        pair_layout.addWidget(pair_tip)
+        ai_page_layout.addWidget(pair_group)
+        ai_page_layout.addStretch()
+        for name, widget in (("遮挡与选区", edit_page), ("AI 与配准", ai_page)):
+            inner = QScrollArea()
+            inner.setWidgetResizable(True)
+            inner.setFrameShape(QFrame.Shape.NoFrame)
+            inner.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            inner.setWidget(widget)
+            self.side_tabs.addTab(inner, name)
+        left.addWidget(self.side_tabs, 1)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(sidebar)
-        splitter.addWidget(scroll)
+        splitter.addWidget(sidebar)
         workspace = QWidget()
         workspace.setObjectName("workspaceRoot")
         workspace_layout = QVBoxLayout(workspace)
@@ -203,25 +240,96 @@ class MainWindow(QMainWindow):
         header_text.addWidget(self.workspace_info)
         header_layout.addLayout(header_text)
         header_layout.addStretch()
+        self.mode_label = QLabel("保护区 · 红色")
+        self.mode_label.setObjectName("modeLabel")
+        header_layout.addWidget(self.mode_label)
+        self.compare_toggle = QCheckBox("并排对比")
+        self.compare_toggle.setToolTip("同时查看原始画布与公开遮挡预览，方便检查边缘")
+        self.compare_toggle.toggled.connect(self._toggle_compare)
+        header_layout.addWidget(self.compare_toggle)
         fit_btn = self._btn("适应窗口", self.canvas.zoom_fit)
         fit_btn.setObjectName("toolbarBtn")
         actual_btn = self._btn("100%", self.canvas.zoom_one)
         actual_btn.setObjectName("toolbarBtn")
         header_layout.addWidget(fit_btn)
         header_layout.addWidget(actual_btn)
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setObjectName("zoomLabel")
+        header_layout.addWidget(self.zoom_label)
         workspace_layout.addWidget(header)
         self.canvas.setObjectName("imageCanvas")
-        workspace_layout.addWidget(self.canvas, 1)
-        footer = QLabel("红色：加密遮挡选区     绿色：允许 AI 编辑区     Ctrl+滚轮 / 滚轮：缩放     Ctrl+Z：撤销")
+        self.view_split = QSplitter(Qt.Orientation.Horizontal)
+        self.view_split.setObjectName("viewSplit")
+        self.view_split.addWidget(self.canvas)
+        self.compare_panel = QWidget()
+        self.compare_panel.setObjectName("comparePanel")
+        compare_layout = QVBoxLayout(self.compare_panel)
+        compare_layout.setContentsMargins(7, 7, 7, 7)
+        compare_layout.setSpacing(5)
+        compare_label = QLabel("公开预览 · 仅可见像素（不能解密）")
+        compare_label.setObjectName("previewCaption")
+        compare_layout.addWidget(compare_label)
+        self.compare_view = QGraphicsView()
+        self.compare_view.setObjectName("compareView")
+        self.compare_view.setRenderHints(self.canvas.renderHints())
+        self.compare_scene = QGraphicsScene(self.compare_view)
+        self.compare_item = QGraphicsPixmapItem()
+        self.compare_scene.addItem(self.compare_item)
+        self.compare_view.setScene(self.compare_scene)
+        compare_layout.addWidget(self.compare_view, 1)
+        self.view_split.addWidget(self.compare_panel)
+        self.view_split.setStretchFactor(0, 1)
+        self.view_split.setStretchFactor(1, 1)
+        self.compare_panel.hide()
+        workspace_layout.addWidget(self.view_split, 1)
+        footer = QLabel("红色：加密遮挡区 · 绿色：AI 编辑许可区 · B 画笔 / E 橡皮 / R 矩形 / L 套索 / P 多边形 / H 平移（画布聚焦时） · 滚轮缩放")
         footer.setObjectName("workspaceInfo")
         footer.setWordWrap(True)
         workspace_layout.addWidget(footer)
         splitter.addWidget(workspace)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([355, 1005])
+        splitter.setSizes([395, 1005])
         self.setCentralWidget(splitter)
         self.setStyleSheet(STYLESHEET)
+
+    def _zoom_changed(self, factor: float):
+        if hasattr(self, "zoom_label"):
+            self.zoom_label.setText(f"{factor * 100:.0f}%")
+
+    def _toggle_compare(self, on: bool):
+        self.compare_panel.setVisible(on)
+        if on:
+            self.view_split.setSizes([600, 560])
+            self.toggle_preview.setChecked(False)
+            self.toggle_preview.setEnabled(False)
+            self._update_compare()
+        else:
+            self.toggle_preview.setEnabled(True)
+            self.canvas.zoom_fit()
+
+    def _request_compare(self):
+        if not getattr(self, "compare_toggle", None) or not self.compare_toggle.isChecked():
+            return
+        if self._compare_pending:
+            return
+        self._compare_pending = True
+        self._compare_timer.start(110)
+
+    def _update_compare(self):
+        self._compare_pending = False
+        if not getattr(self, "compare_toggle", None) or not self.compare_toggle.isChecked():
+            return
+        if self.canvas.original is None:
+            return
+        protection_mask = self.saved_conceal_mask if self.roi_active else self.canvas.mask
+        if protection_mask is None:
+            return
+        public = render_preview(self.canvas.original, protection_mask,
+                                self._style(), self.block_spin.value(), self.solid_color)
+        self.compare_item.setPixmap(_pixmap(public))
+        self.compare_scene.setSceneRect(0, 0, public.width, public.height)
+        self.compare_view.fitInView(self.compare_scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
     def _shortcuts(self):
         for key, call in (("Ctrl+Z", self.canvas.undo), ("Ctrl+Shift+Z", self.canvas.redo),
@@ -229,6 +337,14 @@ class MainWindow(QMainWindow):
                           ("Ctrl+0", self.canvas.zoom_fit), ("Ctrl+1", self.canvas.zoom_one)):
             sh = QShortcut(QKeySequence(key), self)
             sh.activated.connect(call)
+        # Single-letter shortcuts only work while the image canvas has focus;
+        # entering hex colors, filenames or passwords stays unaffected.
+        self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        for key, tool in (("B", "brush"), ("E", "erase"), ("R", "rect"),
+                          ("L", "lasso"), ("P", "polygon"), ("H", "pan")):
+            sh = QShortcut(QKeySequence(key), self.canvas)
+            sh.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            sh.activated.connect(lambda t=tool: self._set_tool(t))
 
     def _set_tool(self, tool: str):
         self.canvas.set_tool(tool)
@@ -243,6 +359,7 @@ class MainWindow(QMainWindow):
     def _style_changed(self, *_):
         self.canvas.set_conceal_style(self._style(), self.block_spin.value(), self.solid_color)
         self._refresh_color_controls()
+        self._request_compare()
         if self.original_bytes is not None and not self._loading:
             self.modified = True
 
@@ -281,10 +398,12 @@ class MainWindow(QMainWindow):
     def _mask_changed(self):
         if not self._loading and self.original_bytes is not None and not self.roi_active:
             self.modified = True
+        self._request_compare()
         if self.canvas.mask is not None:
             n = self.canvas.mask.histogram()[255]
             total = self.canvas.mask.width * self.canvas.mask.height
-            self.mask_stat.setText(f"加密面积：{n / total * 100:.2f}%（{n:,} / {total:,} 像素）")
+            kind = "AI 许可区域" if self.roi_active else "加密遮盖面积"
+            self.mask_stat.setText(f"{kind}：{n / total * 100:.2f}%（{n:,} / {total:,} 像素）")
             if hasattr(self, "workspace_info"):
                 mode = "AI 编辑许可" if self.roi_active else "受保护遮挡"
                 self.workspace_info.setText(f"{self.filename or '未载入文件'}  |  {self.canvas.mask.width} × {self.canvas.mask.height}  |  {mode} {n / total * 100:.2f}%")
@@ -324,6 +443,9 @@ class MainWindow(QMainWindow):
             if hasattr(self, "roi_button"):
                 self.roi_button.setText("3 · 编辑 GPT 可写入区域（绿色）")
             self.canvas.set_selection_tint((245, 68, 88, 135))
+            if hasattr(self, "mode_label"):
+                self.mode_label.setText("保护区 · 红色")
+                self.finish_roi_btn.hide()
             self.original_bytes = data
             self.filename = name
             self.container_path = container
@@ -347,6 +469,7 @@ class MainWindow(QMainWindow):
         finally:
             self._loading = False
         self.modified = False
+        self._request_compare()
         self.setWindowTitle(f"VeilPNG · {name}")
         self.status.showMessage(f"已打开 {name}，尺寸 {original.width} × {original.height}")
 
@@ -540,6 +663,9 @@ class MainWindow(QMainWindow):
             self.canvas.undo_stack.clear()
             self.canvas.redo_stack.clear()
             self.roi_active = True
+            self.mode_label.setText("AI 许可区 · 绿色")
+            self.finish_roi_btn.show()
+            self.side_tabs.setCurrentIndex(0)
             self.canvas.set_preview(False)
             self.toggle_preview.setChecked(False)
             self.canvas.set_selection_tint((40, 226, 169, 140))
@@ -552,10 +678,14 @@ class MainWindow(QMainWindow):
             self.canvas.undo_stack.clear()
             self.canvas.redo_stack.clear()
             self.roi_active = False
+            self.mode_label.setText("保护区 · 红色")
+            self.finish_roi_btn.hide()
+            self.side_tabs.setCurrentIndex(1)
             self.canvas.set_selection_tint((245, 68, 88, 135))
             self.roi_button.setText("3 · 编辑 GPT 可写入区域（绿色）")
             self.status.showMessage("GPT 可编辑区域已保存，红色为原始加密遮挡选区")
         self.canvas._refresh_overlay()
+        self._request_compare()
         # Switching the editor target does not modify the encrypted mask.
         self._loading = True
         try:

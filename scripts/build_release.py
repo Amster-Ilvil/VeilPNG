@@ -35,19 +35,19 @@ def build():
         app = ROOT / "dist" / "VeilPNG.app"
         if not app.exists():
             raise RuntimeError("Expected macOS .app bundle not produced")
-        out = artifact_dir / f"VeilPNG-v0.4.0-macOS-{machine_tag}-unsigned.zip"
+        out = artifact_dir / f"VeilPNG-v0.4.1-macOS-{machine_tag}-unsigned.zip"
         subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(out)], check=True)
     elif system == "Windows":
         source = ROOT / "dist" / "VeilPNG"
         if not (source / "VeilPNG.exe").exists():
             raise RuntimeError("Expected Windows executable not produced")
-        prefix = artifact_dir / f"VeilPNG-v0.4.0-Windows-{machine_tag}-portable"
+        prefix = artifact_dir / f"VeilPNG-v0.4.1-Windows-{machine_tag}-portable"
         out = Path(shutil.make_archive(str(prefix), "zip", root_dir=source.parent, base_dir=source.name))
     else:
         source = ROOT / "dist" / "VeilPNG"
         if not (source / "VeilPNG").exists():
             raise RuntimeError("Expected Linux executable not produced")
-        out = artifact_dir / f"VeilPNG-v0.4.0-Linux-{machine_tag}-portable.tar.gz"
+        out = artifact_dir / f"VeilPNG-v0.4.1-Linux-{machine_tag}-portable.tar.gz"
         with tarfile.open(out, "w:gz") as tar:
             tar.add(source, arcname="VeilPNG")
     print(f"Built {out} ({out.stat().st_size:,} bytes)")

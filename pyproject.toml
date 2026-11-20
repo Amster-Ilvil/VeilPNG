@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "veilpng"
-version = "0.4.0"
+version = "0.4.1"
 description = "Local-first dual-layer encrypted PNG editor with manual region masking and AI round-trip."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,9 +13,10 @@ license = {text = "MIT"}
 dependencies = ["Pillow>=10.0", "cryptography>=42.0", "argon2-cffi>=23.1"]
 
 [project.optional-dependencies]
-gui = ["PySide6>=6.6"]
+gui = ["PySide6==6.11.2"]
 ai = ["opencv-python-headless>=4.8", "numpy>=1.24"]
-full = ["PySide6>=6.6", "opencv-python-headless>=4.8", "numpy>=1.24"]
+full = ["PySide6==6.11.2", "opencv-python-headless>=4.8", "numpy>=1.24"]
+test = ["pytest>=8.0"]
 build = ["pyinstaller>=6.10"]
 
 [project.scripts]
@@ -25,3 +26,5 @@ veilpng-gui = "veilpng.gui:main"
 [tool.setuptools.packages.find]
 include = ["veilpng*"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]

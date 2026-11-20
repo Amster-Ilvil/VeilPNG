@@ -51,6 +51,18 @@ QComboBox:focus, QSpinBox:focus, QLineEdit:focus { border-color:#60A5FA; }
 QScrollArea { border:none; background:#F8FAFD; }
 QSlider::groove:horizontal { height:5px; border-radius:2px; background:#D7E4F2; }
 QSlider::handle:horizontal { width:14px; margin:-5px 0; border-radius:7px; background:#2563EB; }
+QTabWidget#sideTabs::pane { background:#F7F9FD; border:1px solid #DCE5F1; border-radius: 10px; }
+QTabWidget#sideTabs QTabBar::tab {
+    background:#EDF2FA; border:1px solid #DCE5F1; border-bottom:none;
+    min-width:110px; padding:8px 9px; border-top-left-radius:8px; border-top-right-radius:8px;
+    color:#54708E; font-weight:700;
+}
+QTabWidget#sideTabs QTabBar::tab:selected { background:white; color:#1D4ED8; }
+QWidget#comparePanel { background:#FFFFFF; border:1px solid #DCE5F1; border-radius:9px; }
+QLabel#previewCaption { font-size:12px; color:#2563EB; font-weight:700; }
+QLabel#modeLabel { background:#F0F4FB; border-radius:6px; color:#4B6584; padding:5px 7px; font-weight:700; }
+QLabel#zoomLabel { min-width:43px; color:#375A82; font-weight:700; }
+QGraphicsView#compareView { border:1px solid #E3EAF3; background:#E9EFF7; }
 QStatusBar { color:#64748B; background:#FFFFFF; border-top:1px solid #E2E8F0; }
 QGraphicsView#imageCanvas { border:1px solid #DEE5EF; border-radius: 8px; }
 """

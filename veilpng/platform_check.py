@@ -19,7 +19,7 @@ def doctor() -> dict:
             version = "installed (distribution name unknown)" if available else None
         dependencies[module] = {"available": available, "version": version}
     return {
-        "app": "VeilPNG v0.4.0",
+        "app": "VeilPNG v0.4.1",
         "python": sys.version.split()[0],
         "system": platform.system(),
         "machine": platform.machine(),
