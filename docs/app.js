@@ -1,6 +1,7 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.3.0";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.3.0";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.3.0";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.3.0";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -13,9 +14,9 @@ function controls(){
   const p=current();for(const x of [ui.files,ui.clearAll,ui.tool,ui.radius,ui.shade])x.disabled=busy;
   ui.undo.disabled=busy||!p||!p.ops.length;ui.redo.disabled=busy||!p||!p.redo.length;ui.clearMask.disabled=busy||!p||!p.ops.length;
   ui.exportOne.disabled=busy||!p||count===0;ui.exportAll.disabled=busy||!pages.some(marked);
-  syncReturnControls();
+  syncReturnControls();syncProjectControls();
   ui.queue.replaceChildren();
-  pages.forEach((q,i)=>{const li=document.createElement("li"),b=document.createElement("button");b.type="button";b.textContent=(pairIsApproved(q)?"✓ ":pairIsCurrent(q)?"◐ ":marked(q)?"● ":"○ ")+q.file.name;b.disabled=busy;b.setAttribute("aria-current",String(i===index));b.onclick=()=>run(()=>select(i));li.append(b);ui.queue.append(li);});
+  pages.forEach((q,i)=>{const li=document.createElement("li"),b=document.createElement("button");b.type="button";b.textContent=(pairIsApproved(q)?"✓ ":pairIsCurrent(q)?"◐ ":marked(q)?"● ":"○ ")+"["+validRole(q.role)+"] "+q.file.name;b.disabled=busy;b.setAttribute("aria-current",String(i===index));b.onclick=()=>run(()=>select(i));li.append(b);ui.queue.append(li);});
 }
 async function run(fn){if(busy)return;busy=true;drag=null;controls();try{await fn();}catch(e){status("操作失败："+String(e.message||e));}finally{busy=false;controls();}}
 async function decode(file){
@@ -43,24 +44,24 @@ window.addEventListener("resize",fitCanvas);
 function render(){clearRestored();const p=current();if(!p||!bitmap)return;count=draw(bitmap,p,ui.preview);ui.gesture.width=bitmap.width;ui.gesture.height=bitmap.height;ui.gesture.getContext("2d").clearRect(0,0,bitmap.width,bitmap.height);
   ui.shade.value=String(p.shade);ui.stack.hidden=false;ui.empty.hidden=true;fitCanvas();status((index+1)+"/"+pages.length+" · "+bitmap.width+" × "+bitmap.height+" · 已遮盖 "+count+" 像素");controls();}
 async function select(i){const b=await decode(pages[i].file);if(bitmap)bitmap.close();bitmap=b;index=i;render();const p=current();if(pairIsCurrent(p)){try{await showPair(p);}catch(e){invalidatePair(p);throw e;}}}
-ui.files.onchange=()=>{const incoming=Array.from(ui.files.files);ui.files.value="";run(async()=>{if(!incoming.length)return;if(pages.length+incoming.length>32||pages.reduce((s,p)=>s+p.file.size,0)+incoming.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error("队列超过容量限制");for(const f of incoming){if(f.size>MAX)throw Error("单文件超过 20 MB");}const staged=[];for(const f of incoming){const b=await decode(f);b.close();staged.push({file:f,ops:[],redo:[],shade:0});}const old=pages.length;pages.push(...staged);if(index<0)await select(old);else controls();});};
+ui.files.onchange=()=>{const incoming=Array.from(ui.files.files);ui.files.value="";run(async()=>{if(!incoming.length)return;if(pages.length+incoming.length>32||pages.reduce((s,p)=>s+p.file.size,0)+incoming.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error("队列超过容量限制");for(const f of incoming){if(f.size>MAX)throw Error("单文件超过 20 MB");}const staged=[];for(const f of incoming){staged.push(await newPage(f,$("importRole").value));}const old=pages.length;pages.push(...staged);if(index<0)await select(old);else controls();markDirty();});};
 function point(e){const r=ui.gesture.getBoundingClientRect();return [Math.max(0,Math.min(ui.gesture.width-1,Math.floor((e.clientX-r.left)*ui.gesture.width/r.width))),Math.max(0,Math.min(ui.gesture.height-1,Math.floor((e.clientY-r.top)*ui.gesture.height/r.height)))];}
 function guide(){const c=ui.gesture,x=c.getContext("2d");x.clearRect(0,0,c.width,c.height);if(!drag)return;const d=drag;x.strokeStyle="#e84a5f";x.fillStyle="#e84a5f";x.globalAlpha=.65;if(d.kind==="rect"){x.lineWidth=Math.max(2,c.width/500);x.strokeRect(d.a[0],d.a[1],d.b[0]-d.a[0],d.b[1]-d.a[1]);}else{x.lineWidth=d.radius*2;x.lineCap="round";x.lineJoin="round";x.beginPath();x.moveTo(...d.points[0]);for(const p of d.points)x.lineTo(...p);x.stroke();x.beginPath();x.arc(...d.points[0],d.radius,0,Math.PI*2);x.fill();}x.globalAlpha=1;}
 ui.gesture.onpointerdown=e=>{if(busy||!current()||drag||e.button!==0)return;e.preventDefault();const p=point(e),kind=ui.tool.value;drag=kind==="rect"?{kind,a:p,b:p}:{kind,radius:Math.max(1,Math.min(128,Math.round(Number(ui.radius.value)||12))),points:[p]};ui.gesture.setPointerCapture(e.pointerId);guide();};
 ui.gesture.onpointermove=e=>{if(!drag||busy)return;const p=point(e);if(drag.kind==="rect")drag.b=p;else if(drag.points.length<2048){const q=drag.points.at(-1);if(q[0]!==p[0]||q[1]!==p[1])drag.points.push(p);}guide();};
-ui.gesture.onpointerup=e=>{if(!drag||busy)return;const d=drag;drag=null;const p=point(e);if(d.kind==="rect")d.b=p;else if(d.points.length<2048)d.points.push(p);const q=current();if(q.ops.length>=128){guide();status("每页最多 128 次选区操作，请清空或撤销后再编辑。");return;}q.ops.push(d);q.redo=[];invalidatePair(q);render();};
+ui.gesture.onpointerup=e=>{if(!drag||busy)return;const d=drag;drag=null;const p=point(e);if(d.kind==="rect")d.b=p;else if(d.points.length<2048)d.points.push(p);const q=current();if(q.ops.length>=128){guide();status("每页最多 128 次选区操作，请清空或撤销后再编辑。");return;}q.ops.push(d);q.redo=[];invalidatePair(q);render();markDirty();};
 ui.gesture.onpointercancel=()=>{drag=null;guide();};
-ui.undo.onclick=()=>{if(current()?.ops.length){current().redo.push(current().ops.pop());invalidatePair(current());render();}};
-ui.redo.onclick=()=>{if(current()?.redo.length){current().ops.push(current().redo.pop());invalidatePair(current());render();}};
-ui.clearMask.onclick=()=>{if(current()&&confirm("清空本页选区？")){current().ops=[];current().redo=[];invalidatePair(current());render();}};
-ui.shade.onchange=()=>{if(current()){current().shade=Number(ui.shade.value);invalidatePair(current());render();}};
-ui.clearAll.onclick=()=>{if(!pages.length||confirm("清空全部图片和选区？")){if(bitmap)bitmap.close();bitmap=null;clearRestored();pages=[];index=-1;count=0;drag=null;ui.stack.hidden=true;ui.empty.hidden=false;for(const c of [ui.preview,ui.gesture]){c.width=1;c.height=1;}status("尚未导入图片");controls();}};
+ui.undo.onclick=()=>{if(current()?.ops.length){current().redo.push(current().ops.pop());invalidatePair(current());render();markDirty();}};
+ui.redo.onclick=()=>{if(current()?.redo.length){current().ops.push(current().redo.pop());invalidatePair(current());render();markDirty();}};
+ui.clearMask.onclick=()=>{if(current()&&confirm("清空本页选区？")){current().ops=[];current().redo=[];invalidatePair(current());render();markDirty();}};
+ui.shade.onchange=()=>{if(current()){current().shade=Number(ui.shade.value);invalidatePair(current());render();markDirty();}};
+ui.clearAll.onclick=()=>{if(!pages.length||confirm("清空全部图片和选区？")){if(bitmap)bitmap.close();bitmap=null;clearRestored();pages=[];index=-1;count=0;drag=null;ui.stack.hidden=true;ui.empty.hidden=false;for(const c of [ui.preview,ui.gesture]){c.width=1;c.height=1;}status("尚未导入图片");controls();markDirty();}};
 function png(c){return new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(Error("PNG 编码失败")),"image/png"));}
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 const name=i=>String(i+1).padStart(4,"0")+"_redacted.png";
 async function exportPage(p){const b=await decode(p.file),c=document.createElement("canvas");try{if(!draw(b,p,c))return null;return await png(c);}finally{b.close();c.width=1;c.height=1;}}
-ui.exportOne.onclick=()=>run(async()=>{const b=await exportPage(current());if(!b)throw Error("选区为空");download(b,name(index));status("当前 PNG 已生成");});
-ui.exportAll.onclick=()=>run(async()=>{const entries=[];let size=0;for(let i=0;i<pages.length;i++){if(!marked(pages[i]))continue;status("正在编码 "+(i+1)+"/"+pages.length);const b=await exportPage(pages[i]);if(!b)continue;size+=b.size;if(size>128*1024*1024)throw Error("导出超过 128 MB，请分批处理");entries.push({name:name(i),data:new Uint8Array(await b.arrayBuffer())});}if(!entries.length)throw Error("没有有效遮盖选区");download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_redacted.zip");status("已生成 "+entries.length+" 张遮盖 PNG 的 ZIP");});
+ui.exportOne.onclick=()=>run(async()=>{if($("autosave").checked)await flushCheckpoint();else if(!confirm("确认已保存项目记录并保留原图？"))return;const b=await exportPage(current());if(!b)throw Error("选区为空");download(b,name(index));status("当前 PNG 已生成");});
+ui.exportAll.onclick=()=>run(async()=>{if($("autosave").checked)await flushCheckpoint();else if(!confirm("确认已保存项目记录并保留原图？刷新可能丢失未保存选区。"))return;const entries=[];let size=0;for(let i=0;i<pages.length;i++){if(!marked(pages[i]))continue;status("正在编码 "+(i+1)+"/"+pages.length);const b=await exportPage(pages[i]);if(!b)continue;size+=b.size;if(size>128*1024*1024)throw Error("导出超过 128 MB，请分批处理");entries.push({name:name(i),data:new Uint8Array(await b.arrayBuffer())});}if(!entries.length)throw Error("没有有效遮盖选区");download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_redacted.zip");status("已生成 "+entries.length+" 张遮盖 PNG 的 ZIP");});
 
 function syncReturnControls(){
   $("saveRecord").disabled=busy||!current()||count===0;
@@ -93,7 +94,7 @@ $("recordFile").onchange=()=>{const f=$("recordFile").files[0];$("recordFile").v
   const p=current();if(!p||!bitmap)throw Error("请先导入原图");
   const r=loadMaskRecord(await f.text(),bitmap.width,bitmap.height,await sourceHash(p.file));
   if(p.ops.length&&!confirm("替换当前页遮盖记录？"))return;
-  p.ops=r.ops;p.shade=r.shade;p.redo=[];invalidatePair(p);render();status("遮盖记录已恢复，原图 SHA-256 匹配。");
+  p.ops=r.ops;p.shade=r.shade;p.redo=[];invalidatePair(p);render();markDirty();status("遮盖记录已恢复，原图 SHA-256 匹配。");
 });};
 async function composePair(p,source,returnedFile){
   const b=await decode(returnedFile),c=document.createElement("canvas");
@@ -163,4 +164,89 @@ $("exportBatch").onclick=()=>run(async()=>{
   download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_restored.zip");
   status("已生成 "+entries.length+" 张已确认恢复 PNG 的 ZIP。");
 });
+
+async function newPage(file,role="其他"){
+  const b=await decode(file);try{return {file,width:b.width,height:b.height,hash:await sourceHash(file),role:validRole(role),ops:[],redo:[],shade:0};}finally{b.close();}
+}
+let saveChain=Promise.resolve(),pending=false,revision=0;
+function cpStatus(t){$("checkpointStatus").textContent=t;}
+function syncProjectControls(){
+  const p=current(),target=$("copyTarget"),old=target.value;
+  target.replaceChildren();const placeholder=document.createElement("option");placeholder.value="";placeholder.textContent="选择目标页";target.append(placeholder);
+  for(let i=0;i<pages.length;i++){if(i===index)continue;const opt=document.createElement("option");opt.value=String(i);opt.textContent="["+validRole(pages[i].role)+"] "+pages[i].file.name;target.append(opt);}
+  if([...target.options].some(o=>o.value===old))target.value=old;
+  $("pageRole").value=validRole(p?.role);
+  for(const id of ["quickImport","importRole","autosave","resumeProject","deleteCheckpoint"])$(id).disabled=busy;
+  $("pageRole").disabled=busy||!p;$("copyTarget").disabled=busy||!p||pages.length<2;
+  $("copyMask").disabled=busy||!p||!count||!target.value;
+  $("saveProject").disabled=busy||!pages.length;$("openProject").disabled=busy||!pages.length;
+  $("quickExport").disabled=ui.exportAll.disabled;$("quickReturn").disabled=$("loadReturn").disabled;
+  $("quickBatchReturn").disabled=busy||!pages.some(marked);$("quickRestore").disabled=$("exportBatch").disabled;
+}
+function markDirty(){
+  revision++;if(!$("autosave").checked)return;
+  pending=true;cpStatus("本地备份待保存…");
+  flushCheckpoint().catch(e=>cpStatus("本地备份失败："+e.message+"；请保存项目记录。"));
+}
+function flushCheckpoint(){
+  if(!$("autosave").checked)return Promise.resolve();
+  const rev=revision,record=pages.length?projectRecord(pages):null,files=pages.map(p=>p.file);
+  pending=true;cpStatus("正在保存本地备份…");
+  const job=saveChain.catch(()=>{}).then(()=>record?checkpoint("put",{record,files}):checkpoint("delete"));
+  saveChain=job;
+  return job.then(()=>{if(rev===revision){pending=false;cpStatus(record?"本地备份已保存（含原图，刷新可恢复）":"本地备份已清空");}}).catch(e=>{if(rev===revision){pending=true;cpStatus("本地备份失败："+e.message);}throw e;});
+}
+$("autosave").onchange=()=>{
+  if($("autosave").checked){
+    if(!confirm("仅在私人设备开启：原图和选区会保存在当前网站的浏览器存储，未加密。不要在共享电脑开启。继续？")){$("autosave").checked=false;return;}
+    if(pages.length)markDirty();else cpStatus("已开启自动保存；导入图片后开始。");
+  }else{revision++;pending=false;cpStatus("已停止自动保存；已有备份仍保留，可点击删除浏览器备份。");}
+};
+window.addEventListener("beforeunload",e=>{if(pages.some(marked)&&(!$("autosave").checked||pending)){e.preventDefault();e.returnValue="";}});
+$("resumeProject").onclick=()=>run(async()=>{
+  await saveChain.catch(()=>{});const saved=await checkpoint("get");
+  if(!saved?.record||!Array.isArray(saved.files)||saved.files.length>32||saved.files.reduce((n,f)=>n+(f?.size||0),0)>TOTAL)throw Error("没有可恢复的本地备份");
+  if(pages.length&&!confirm("恢复备份将替换当前队列，继续？"))return;
+  const staged=[];for(const f of saved.files){if(!(f instanceof File))throw Error("本地备份文件无效");staged.push(await newPage(f));}
+  const matched=matchProject(saved.record,staged);pages=matched;await select(0);cpStatus("已恢复全部原图、分组和选区；请重新导入回传图。");
+});
+$("deleteCheckpoint").onclick=()=>run(async()=>{
+  if(!confirm("删除浏览器保存的原图和选区备份？不会删除你的本地文件。"))return;
+  $("autosave").checked=false;revision++;await saveChain.catch(()=>{});await checkpoint("delete");pending=false;cpStatus("浏览器备份已删除。");
+});
+$("saveProject").onclick=()=>run(async()=>{
+  const r=projectRecord(pages);download(new Blob([JSON.stringify(r)],{type:"application/json"}),"veilpng_local_project.json");
+  status("全部项目记录已生成：仅保存本地，需同时保留原图。");
+});
+$("openProject").onclick=()=>$("projectFile").click();
+$("projectFile").onchange=()=>{const f=$("projectFile").files[0];$("projectFile").value="";if(!f)return;run(async()=>{
+  if(f.size>64*1024*1024)throw Error("项目记录超限");
+  const r=JSON.parse(await f.text()),matched=matchProject(r,pages);
+  if(pages.some(marked)&&!confirm("替换当前全部选区并按项目记录排序？"))return;
+  pages=matched;await select(0);markDirty();status("项目记录已恢复，所有原图 SHA-256 均匹配。");
+});};
+$("pageRole").onchange=()=>{if(current()){current().role=validRole($("pageRole").value);controls();markDirty();}};
+$("copyTarget").onchange=()=>{$("copyMask").disabled=busy||!current()||!count||!$("copyTarget").value;};
+$("copyMask").onclick=()=>run(async()=>{
+  const p=current(),raw=$("copyTarget").value,i=Number(raw),q=pages[i];
+  if(!raw||!p||!q||i===index||!count)throw Error("请选择目标页");
+  if(p.width!==q.width||p.height!==q.height)throw Error("中日图片尺寸不同，请分别标记");
+  if(!confirm("确认两张图已对齐？将替换目标页选区，请在目标页检查是否完整覆盖。"))return;
+  q.ops=structuredClone(p.ops);q.shade=p.shade;q.redo=[];invalidatePair(q);markDirty();await select(i);status("已复制选区，请检查目标页覆盖位置。");
+});
+$("quickImport").onclick=()=>ui.files.click();
+$("quickExport").onclick=()=>ui.exportAll.click();
+$("quickReturn").onclick=()=>$("returnFile").click();
+$("quickRestore").onclick=()=>$("exportBatch").click();
+$("quickBatchReturn").onclick=()=>$("batchReturnFile").click();
+$("batchReturnFile").onchange=()=>{const files=Array.from($("batchReturnFile").files);$("batchReturnFile").value="";if(!files.length)return;run(async()=>{
+  if(files.length>32)throw Error("回传图最多 32 张");
+  const staged=new Map();
+  for(const f of files){const i=returnIndex(f.name,pages.length),p=pages[i];if(staged.has(i)||!marked(p))throw Error("重复页码或无选区："+f.name);const b=await decode(f);try{if(b.width!==p.width||b.height!==p.height)throw Error("尺寸不一致："+f.name);}finally{b.close();}if(!maskFor(p.width,p.height,p.ops).some(Boolean))throw Error("选区为空："+f.name);staged.set(i,f);}
+  const total=pages.reduce((n,p,i)=>n+(staged.has(i)?staged.get(i).size:pairIsCurrent(p)?p.pair.file.size:0),0);
+  if(total>TOTAL)throw Error("回传队列超过 80 MB");
+  if(!confirm("按公开图编号配对 "+staged.size+" 张返回图？请逐页检查，全部为待确认。"))return;
+  for(const [i,f] of staged)attachPair(pages[i],f);
+  await select(staged.keys().next().value);status("批量导入完成，请逐页确认对应关系。");
+});};
 controls();
