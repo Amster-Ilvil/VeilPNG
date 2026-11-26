@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src blob: data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'">
+<meta name="referrer" content="no-referrer"><title>VeilPNG Web · 本地图片遮盖</title><link rel="stylesheet" href="style.css"></head>
+<body><header><div><h1>VeilPNG Web</h1><p>本地图片遮盖工作台 · 预览版</p></div><span class="local">浏览器本地处理</span></header>
+<main><aside><h2>图片队列</h2><label class="button primary" for="files">导入 PNG / JPEG</label><input id="files" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" multiple>
+<p class="small">最多 32 张；每张不超过 12 百万像素、20 MB，合计不超过 80 MB。仅处理静态图片。</p>
+<ol id="queue"></ol><button id="clearAll">清空全部图片</button></aside>
+<section class="work"><div class="toolbar" aria-label="编辑工具"><label>工具 <select id="tool"><option value="rect">矩形</option><option value="brush">画笔</option><option value="erase">橡皮擦</option></select></label><label>半径 <input id="radius" type="number" min="1" max="128" value="12"> px</label><label>遮盖 <select id="shade"><option value="0">黑色</option><option value="255">白色</option></select></label><button id="undo">撤销</button><button id="redo">重做</button><button id="clearMask">清空选区</button></div>
+<div class="stage"><div id="empty">导入图片后，拖动鼠标或手指编辑选区。</div><div id="stack" hidden><canvas id="preview" aria-label="遮盖后的预览"></canvas><canvas id="gesture" aria-label="绘制遮盖区域"></canvas></div></div>
+<div class="bottom"><span id="status" role="status" aria-live="polite">尚未导入图片</span><button id="exportOne">导出当前 PNG</button><button id="exportAll" class="primary">导出已标记 ZIP</button></div>
+<p class="small">输出为重新编码的普通不透明 PNG，未标记图片不会导出。输出文件名使用通用编号，不保留原文件名或原始元数据。白色背景会改变原图的透明区域。</p></section></main>
+<footer>无账户、无图片上传、无统计脚本、无远程图像处理。关闭或刷新页面会丢失编辑状态。浏览器扩展、设备及网站托管访问日志不受本工具控制。</footer>
+<script type="module" src="app.js"></script></body></html>
