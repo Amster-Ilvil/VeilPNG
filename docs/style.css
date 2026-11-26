@@ -8,3 +8,5 @@
 .workflow{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px;background:#f0f5fa;border-bottom:1px solid #cbd9e7}.project-bar{margin:12px 14px 0;padding:10px 14px;background:white;border:1px solid #d9e4ef;border-radius:9px}.project-bar p{margin:6px 0 0}.project-bar label{font-size:13px}aside label{display:block;margin:7px 0}#copyTarget{max-width:100%;display:block;margin:6px 0}.workflow button{min-height:38px}.workflow .primary{font-weight:600}
 
 #registrationPanel{border:1px solid #ccd9e8;border-radius:8px;padding:10px;background:#f5f8fc}#registrationPanel h3{margin:0 0 8px;font-size:15px}#registrationPreview{width:auto;max-width:100%;height:auto;max-height:65vh;margin:auto}#registerPair,#copyMask{width:100%;margin:5px 0}
+
+.workflow label{display:flex;align-items:center;gap:6px;font-size:13px}.project-bar button{white-space:normal}
