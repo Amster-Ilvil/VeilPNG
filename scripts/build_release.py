@@ -12,13 +12,23 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import re
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def current_version() -> str:
+    text = (ROOT / "veilpng" / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', text)
+    if not match:
+        raise RuntimeError("Could not read VeilPNG version")
+    return match.group(1)
 
 
 def build():
     system = platform.system()
     arch = platform.machine().lower()
+    release_version = current_version()
     if system not in ("Darwin", "Windows", "Linux"):
         raise RuntimeError(f"Unsupported packaging platform: {system}")
     artifact_dir = ROOT / "artifacts"
@@ -35,19 +45,19 @@ def build():
         app = ROOT / "dist" / "VeilPNG.app"
         if not app.exists():
             raise RuntimeError("Expected macOS .app bundle not produced")
-        out = artifact_dir / f"VeilPNG-v0.4.1-macOS-{machine_tag}-unsigned.zip"
+        out = artifact_dir / f"VeilPNG-v{release_version}-macOS-{machine_tag}-unsigned.zip"
         subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(out)], check=True)
     elif system == "Windows":
         source = ROOT / "dist" / "VeilPNG"
         if not (source / "VeilPNG.exe").exists():
             raise RuntimeError("Expected Windows executable not produced")
-        prefix = artifact_dir / f"VeilPNG-v0.4.1-Windows-{machine_tag}-portable"
+        prefix = artifact_dir / f"VeilPNG-v{release_version}-Windows-{machine_tag}-portable"
         out = Path(shutil.make_archive(str(prefix), "zip", root_dir=source.parent, base_dir=source.name))
     else:
         source = ROOT / "dist" / "VeilPNG"
         if not (source / "VeilPNG").exists():
             raise RuntimeError("Expected Linux executable not produced")
-        out = artifact_dir / f"VeilPNG-v0.4.1-Linux-{machine_tag}-portable.tar.gz"
+        out = artifact_dir / f"VeilPNG-v{release_version}-Linux-{machine_tag}-portable.tar.gz"
         with tarfile.open(out, "w:gz") as tar:
             tar.add(source, arcname="VeilPNG")
     print(f"Built {out} ({out.stat().st_size:,} bytes)")

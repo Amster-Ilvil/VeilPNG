@@ -40,6 +40,8 @@ QPushButton#primary {
     min-height: 32px;
 }
 QPushButton#primary:hover { background:#1D4ED8; }
+QPushButton#modeNav { min-height:24px; padding:4px 5px; }
+QPushButton#modeNav:checked { background:#2563EB; color:white; border-color:#2563EB; }
 QPushButton#toolbarBtn { min-height:24px; font-size:11px; padding:3px 10px; }
 QPushButton:disabled { background:#F3F5F9; color:#94A3B8; border-color:#E2E8F0; }
 QComboBox, QSpinBox, QLineEdit {
@@ -54,7 +56,7 @@ QSlider::handle:horizontal { width:14px; margin:-5px 0; border-radius:7px; backg
 QTabWidget#sideTabs::pane { background:#F7F9FD; border:1px solid #DCE5F1; border-radius: 10px; }
 QTabWidget#sideTabs QTabBar::tab {
     background:#EDF2FA; border:1px solid #DCE5F1; border-bottom:none;
-    min-width:110px; padding:8px 9px; border-top-left-radius:8px; border-top-right-radius:8px;
+    min-width:80px; padding:8px 6px; border-top-left-radius:8px; border-top-right-radius:8px;
     color:#54708E; font-weight:700;
 }
 QTabWidget#sideTabs QTabBar::tab:selected { background:white; color:#1D4ED8; }

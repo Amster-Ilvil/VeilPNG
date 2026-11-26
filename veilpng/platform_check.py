@@ -1,5 +1,7 @@
 """Cross-platform dependency diagnostics; never reads images, passwords, or accounts."""
 from __future__ import annotations
+
+from . import __version__
 import importlib.metadata
 import importlib.util
 import json
@@ -19,7 +21,7 @@ def doctor() -> dict:
             version = "installed (distribution name unknown)" if available else None
         dependencies[module] = {"available": available, "version": version}
     return {
-        "app": "VeilPNG v0.4.1",
+        "app": f"VeilPNG v{__version__}",
         "python": sys.version.split()[0],
         "system": platform.system(),
         "machine": platform.machine(),

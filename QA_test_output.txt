@@ -1,0 +1,6 @@
+.......ssssssss......................................................... [ 47%]
+......................s.....................................s........... [ 94%]
+.........                                                                [100%]
+143 passed, 18 skipped in 31.84s
+
+All 15 web Node test files passed. Browser URL administrator policy blocks full browser acceptance. PySide6 absent; GUI tests skipped.

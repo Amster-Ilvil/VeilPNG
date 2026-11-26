@@ -1,6 +1,6 @@
 // Context-only, bounded color correction for local image patches.
 // The reference interior is never sampled. The caller copies back only the requested rectangle.
-export function matchPatchTone(source,reference,w,h,pad){
+export function matchPatchTone(source,reference,w,h,pad,fullContext=false){
  if(source.length!==w*h*4||reference.length!==source.length||!Number.isInteger(pad)||pad<6||w<=2*pad||h<=2*pad)throw Error('Invalid patch context');
  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
  const mid=a=>{const s=[...a].sort((x,y)=>x-y);return s[Math.floor(s.length/2)];};
@@ -35,6 +35,6 @@ export function matchPatchTone(source,reference,w,h,pad){
  before/=test.length*3;after/=test.length*3;
  if(before<1||after>before*.94)return {...identity,before,after:before};
  const data=new Uint8ClampedArray(source);
- for(let y=pad;y<h-pad;y++)for(let x=pad;x<w-pad;x++){const k=(y*w+x)*4;for(let c=0;c<3;c++)data[k+c]=Math.round(corrected(data[k+c],c));}
+ for(let y=fullContext?0:pad;y<(fullContext?h:h-pad);y++)for(let x=fullContext?0:pad;x<(fullContext?w:w-pad);x++){const k=(y*w+x)*4;for(let c=0;c<3;c++)data[k+c]=Math.round(corrected(data[k+c],c));}
  return {data,applied:true,samples:train.length+test.length,before,after};
 }

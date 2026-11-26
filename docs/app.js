@@ -1,20 +1,20 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.5";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.5";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.5";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.5";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.5";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.5";
-import {readPublicZip} from "./zip-read.mjs?v=0.9.5";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.5";
-import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.5";
-import {webpDimensions} from "./webp.mjs?v=0.9.5";
-import {rectanglePlan} from "./local-rect.mjs?v=0.9.5";
-import {matchPatchTone} from "./tone.mjs?v=0.9.5";
-import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.5";
-import {cleanMaskFringe} from "./fringe.mjs?v=0.9.5";
-import {preferPairedReference} from "./paired-reference.mjs?v=0.9.5";
-import {repairJoinLines} from "./join-lines.mjs?v=0.9.5";
-import {verifiedOriginal} from "./original-export.mjs?v=0.9.5";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.6";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.6";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.6";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.6";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.6";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.6";
+import {readPublicZip} from "./zip-read.mjs?v=0.9.6";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.6";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.6";
+import {webpDimensions} from "./webp.mjs?v=0.9.6";
+import {rectanglePlan} from "./local-rect.mjs?v=0.9.6";
+import {matchPatchTone} from "./tone.mjs?v=0.9.6";
+import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.6";
+import {restoreBoundary} from "./return-boundary.mjs?v=0.9.6";
+import {preferPairedReference} from "./paired-reference.mjs?v=0.9.6";
+
+import {verifiedOriginal} from "./original-export.mjs?v=0.9.6";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -130,7 +130,16 @@ function matchPublic(p,source,b){
    if(!draw(source,p,c))throw Error("没有有效遮盖");
    if(c.width===b.width&&c.height===b.height){
      const a=c.getContext("2d").getImageData(0,0,c.width,c.height).data,t=rgbaOf(b).data;
-     if(a.every((v,i)=>v===t[i]))return {matrix:[1,0,0,0],inliers:100000,matches:100000,pixelMedian:0};
+     if(a.every((v,i)=>v===t[i]))return {matrix:[1,0,0,0],inliers:100000,matches:100000,pixelMedian:0,gridVerified:true};
+     // Check visible context on the exact grid, without letting the mask's
+     // artificial black/white edge dominate feature matching.
+     const mask=maskFor(c.width,c.height,p.ops),w=c.width,h=c.height;
+     let total=0,good=0,texture=0,textureGood=0;
+     for(let y=16;y<h-16;y+=4)for(let x=16;x<w-16;x+=4){let i=y*w+x;if(mask[i]||mask[i-16*w-16]||mask[i-16*w+16]||mask[i+16*w-16]||mask[i+16*w+16])continue;
+       let k=i*4,d=Math.max(Math.abs(a[k]-t[k]),Math.abs(a[k+1]-t[k+1]),Math.abs(a[k+2]-t[k+2]));total++;if(d<=24)good++;
+       if(Math.abs(a[k]-a[k+4])+Math.abs(a[k]-a[k+4*w])>22){texture++;if(d<=24)textureGood++;}
+     }
+     if(total>=64&&good/total>=.90&&texture>=20&&textureGood/texture>=.85)return {matrix:[1,0,0,0],inliers:good,matches:total,pixelMedian:0,gridVerified:true};
    }
    return registerImages(c,b);
  }finally{c.width=c.height=1;}
@@ -140,7 +149,7 @@ async function composeUsingSource(p,source,returnedFile){
  try{
    const r=matchPublic(p,source,b),m=r.matrix;
    const rects=rectanglePlan(p.ops,p.shade,source.width,source.height,rgbaOf(b).data,b.width,b.height,m);
-   if(rects){
+   if(!r.gridVerified&&rects&&rects.every(q=>q.dst[0]>=6&&q.dst[1]>=6&&q.dst[2]<b.width-6&&q.dst[3]<b.height-6&&q.src[0]>=6&&q.src[1]>=6&&q.src[2]<source.width-6&&q.src[3]<source.height-6&&(q.dst[2]-q.dst[0]+49)*(q.dst[3]-q.dst[1]+49)<=2000000)&&!rects.some((q,i)=>rects.some((v,j)=>i!==j&&q.dst[0]-24<=v.dst[2]&&q.dst[2]+24>=v.dst[0]&&q.dst[1]-24<=v.dst[3]&&q.dst[3]+24>=v.dst[1]))){
      c.width=b.width;c.height=b.height;const ctx=c.getContext("2d",{alpha:false,willReadFrequently:true});
      ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(b,0,0);
      const original=document.createElement("canvas");original.width=source.width;original.height=source.height;const ox=original.getContext("2d",{alpha:false});ox.fillStyle="#fff";ox.fillRect(0,0,original.width,original.height);ox.drawImage(source,0,0);
@@ -156,29 +165,27 @@ async function composeUsingSource(p,source,returnedFile){
            px.drawImage(original,src[0]-pad*sw/dw,src[1]-pad*sh/dh,sw+2*pad*sw/dw,sh+2*pad*sh/dh,0,0,patch.width,patch.height);
            const sourcePixels=px.getImageData(0,0,patch.width,patch.height),ref=ctx.getImageData(dst[0]-pad,dst[1]-pad,patch.width,patch.height);
            const geo=alignPatchContext(sourcePixels.data,ref.data,patch.width,patch.height,pad);
-           const tone=matchPatchTone(geo.data,ref.data,patch.width,patch.height,pad);
-           sourcePixels.data.set(tone.data);let fringeCount=0,joinCount=0;
-           const merged=new Uint8ClampedArray(ref.data);
-           if($("fringeCleanup").checked){const fringe=cleanMaskFringe(sourcePixels.data,ref.data,patch.width,patch.height,pad,p.shade);merged.set(fringe.data);fringeCount=fringe.changed;}
-           for(let y=pad;y<pad+dh;y++){const start=(y*patch.width+pad)*4;merged.set(sourcePixels.data.subarray(start,start+dw*4),start);}
-           if($("fringeCleanup").checked){const repaired=repairJoinLines(merged,patch.width,patch.height,[pad,pad,pad+dw-1,pad+dh-1]);merged.set(repaired.data);joinCount=repaired.changed;}
-           ref.data.set(merged);
-           const halo=$("fringeCleanup").checked?2:0;
+           const tone=matchPatchTone(geo.data,ref.data,patch.width,patch.height,pad,true);
+           const localMask=maskFor(patch.width,patch.height,[{kind:"rect",a:[pad,pad],b:[pad+dw-1,pad+dh-1]}]);
+           const feather=Math.min(8,Math.floor(pad/3)),maxHalo=Math.min(16,pad-feather);
+           const merged=restoreBoundary(tone.data,ref.data,localMask,patch.width,patch.height,{maxHalo,feather,exact:!$("fringeCleanup").checked});
+           ref.data.set(merged.data);
+           const halo=merged.halo+merged.feather;
            ctx.putImageData(ref,dst[0]-pad,dst[1]-pad,pad-halo,pad-halo,dw+2*halo,dh+2*halo);
-           tones.push({applied:tone.applied,geometry:geo.applied,before:tone.before,after:tone.after,contextCorrelation:geo.after,fringe:fringeCount,join:joinCount,warning:tone.after===null||tone.after>18});
+           tones.push({applied:tone.applied,geometry:geo.applied,before:tone.before,after:tone.after,contextCorrelation:geo.after,fringe:merged.changed,join:0,warning:merged.warning||tone.after===null||tone.after>18});
          }finally{patch.width=patch.height=1;}
        }n+=dw*dh;
      }}finally{original.width=original.height=1;}
      return {blob:await png(c),n,width:b.width,median:r.pixelMedian,localRects:rects.length,rects,tones};
    }
-   if(p.ops.every(o=>o.kind==="rect"))throw Error("未能可靠确认返回图矩形边界，请检查返回图与原选区；不会盲目扩大恢复范围");
+   // Use the validated global transform when local solid bounds cannot be measured (e.g. page edge).
    const mask=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
    c.width=b.width;c.height=b.height;const x=c.getContext("2d",{alpha:false,willReadFrequently:true});
    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.setTransform(m[0],m[1],-m[1],m[0],m[2],m[3]);x.drawImage(source,0,0);x.setTransform(1,0,0,1,0,0);
    const original=x.getImageData(0,0,c.width,c.height);
    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(b,0,0);
-   const returned=x.getImageData(0,0,c.width,c.height),n=restoreRGBA(original.data,returned.data,mask);
-   x.putImageData(returned,0,0);return {blob:await png(c),n,width:b.width,median:r.pixelMedian};
+   const returned=x.getImageData(0,0,c.width,c.height),merged=restoreBoundary(original.data,returned.data,mask,c.width,c.height,{exact:!$("fringeCleanup").checked});
+   returned.data.set(merged.data);x.putImageData(returned,0,0);return {blob:await png(c),n:merged.core,width:b.width,median:r.pixelMedian,tones:[{fringe:merged.changed,warning:merged.warning||(!rects&&!r.gridVerified)}]};
  }finally{b.close();c.width=c.height=1;}
 }
 async function composePair(p,source,returnedFile){

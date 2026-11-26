@@ -106,12 +106,21 @@ def align_gpt_image(reference: Image.Image, gpt: Image.Image,
 
 
 def _changes_from_gpt(base_public, registered_gpt, valid, forbidden, roi,
-                      *, extraction, threshold, min_component_pixels):
+                      *, extraction, threshold, min_component_pixels, edge_guard_px=0):
     cv2, np = _computer_vision()
     ref = np.asarray(base_public.convert("RGB"), dtype=np.uint8)
     edited = np.asarray(registered_gpt.convert("RGB"),dtype=np.uint8)
     forbid = np.asarray(forbidden.convert("L")) > 0
     allow = (np.asarray(roi.convert("L")) > 0) & (~forbid) & (valid>0)
+    if not (0 <= edge_guard_px <= 24):
+        raise ValueError("edge_guard_px must be within 0..24")
+    if edge_guard_px:
+        # Optional conservative interior: never place a generated seam against
+        # the user's exact patch edge; no write may escape the original ROI.
+        interior = cv2.erode((np.asarray(roi.convert("L")) > 0).astype(np.uint8),
+                             cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                                      (2*edge_guard_px+1, 2*edge_guard_px+1)))
+        allow &= interior > 0
     if extraction == "color":
         src_max = ref.max(axis=2).astype(np.int16)
         src_min = ref.min(axis=2).astype(np.int16)
@@ -123,8 +132,32 @@ def _changes_from_gpt(base_public, registered_gpt, valid, forbidden, roi,
         candidate = (ed_chroma >= threshold) & (ed_chroma > src_chroma+18)
     elif extraction == "difference":
         candidate = np.max(np.abs(edited.astype(np.int16)-ref.astype(np.int16)),axis=2) >= threshold
+    elif extraction == "monochrome":
+        # For greyscale lettering/line art. Low-amplitude resampling noise is
+        # rejected before connected-component filtering. This is *not* OCR or
+        # a semantic guarantee: only user-approved ROI may ever be written.
+        ref_chroma = ref.max(axis=2).astype(np.int16)-ref.min(axis=2).astype(np.int16)
+        edit_chroma = edited.max(axis=2).astype(np.int16)-edited.min(axis=2).astype(np.int16)
+        if allow.any() and (float((ref_chroma[allow]>=25).mean()) > .05 or
+                            float((edit_chroma[allow]>=25).mean()) > .10):
+            raise ValueError("Monochrome extraction requires mostly grayscale reference and AI output in ROI")
+        ref_gray = cv2.cvtColor(ref, cv2.COLOR_RGB2GRAY)
+        edt_gray = cv2.cvtColor(edited, cv2.COLOR_RGB2GRAY)
+        smooth_ref = cv2.GaussianBlur(ref_gray, (3,3), .6)
+        smooth_edt = cv2.GaussianBlur(edt_gray, (3,3), .6)
+        difference = np.abs(smooth_ref.astype(np.int16)-smooth_edt.astype(np.int16))
+        ink_crossed = ((ref_gray < 170) != (edt_gray < 170)) | ((ref_gray < 225) != (edt_gray < 225))
+        candidate = (difference >= threshold) & (ink_crossed | (difference >= max(75, threshold*2)))
+    elif extraction == "patch":
+        # Deterministic full-patch replacement. This intentionally copies all
+        # pixels inside the explicit ROI, including background, so users can
+        # remove old text rather than retaining ghost glyphs. Review edges.
+        difference = np.max(np.abs(edited.astype(np.int16)-ref.astype(np.int16)),axis=2)
+        if not np.any((difference >= threshold) & allow):
+            raise ValueError("No eligible GPT changes found in the allowed area; file left unchanged")
+        candidate = allow.copy()
     else:
-        raise ValueError("Extraction must be 'color' or 'difference'")
+        raise ValueError("Extraction must be 'color', 'monochrome', 'difference', or 'patch'")
     candidate &= allow
     # Remove disconnected isolated error pixels. Do not expand beyond the selected ROI.
     count, labels, stats, _ = cv2.connectedComponentsWithStats(candidate.astype(np.uint8),8)
@@ -133,7 +166,7 @@ def _changes_from_gpt(base_public, registered_gpt, valid, forbidden, roi,
         if int(stats[k,cv2.CC_STAT_AREA]) >= min_component_pixels:
             keep[labels == k] = 255
     # anti-alias just around colorful overlay; still must be inside explicit ROI
-    if extraction == "color":
+    if extraction in ("color", "monochrome"):
         keep = cv2.dilate(keep,np.ones((3,3),np.uint8),iterations=1)
         keep[~allow] = 0
     return Image.fromarray(keep,"L"), int(keep.sum()//255), int(allow.sum())
@@ -143,7 +176,7 @@ def smart_edit(container_png: bytes, gpt_png: bytes, password: str,
                edit_roi: Image.Image, *, mode: str = "A2", extraction: str = "color",
                alignment: str = "auto", threshold: int = 45,
                min_component_pixels: int = 20, max_global_fraction: float = .20,
-               style: str | None = None, solid_color: str | None = None):
+               edge_guard_px: int = 0, style: str | None = None, solid_color: str | None = None):
     """Run a guarded GPT A1/A2 edit; no changes outside chosen ROI.
 
     A1: original ciphertext remains bit-identical. A2: only authorized pixels
@@ -158,6 +191,8 @@ def smart_edit(container_png: bytes, gpt_png: bytes, password: str,
         raise ValueError("min_component_pixels outside 1..100000")
     if not (0 < max_global_fraction <= 0.5):
         raise ValueError("max_global_fraction outside (0,.5]")
+    if not (0 <= edge_guard_px <= 24):
+        raise ValueError("edge_guard_px outside 0..24")
     asset = unseal_bytes(container_png, password)
     info = inspect_container(container_png)
     roi = binary_mask(edit_roi, asset.image().size)
@@ -177,7 +212,7 @@ def smart_edit(container_png: bytes, gpt_png: bytes, password: str,
     aligned, valid, reg_report = align_gpt_image(base_public, gpt, asset.mask, roi,method=alignment)
     delta_mask, changed, allowed = _changes_from_gpt(
         base_public,aligned,valid,asset.mask,roi,
-        extraction=extraction,threshold=threshold,min_component_pixels=min_component_pixels)
+        extraction=extraction,threshold=threshold,min_component_pixels=min_component_pixels,edge_guard_px=edge_guard_px)
     if changed == 0:
         raise ValueError("No eligible GPT changes found in the allowed area; file left unchanged")
     if changed > total*max_global_fraction:
@@ -204,18 +239,38 @@ def smart_edit(container_png: bytes, gpt_png: bytes, password: str,
         from .imaging import render_preview
         public_merged = render_preview(new_plain,asset.mask,style or info["preview_style"],
                                        info["preview_block"],solid_color or info["preview_solid_color"])
+    # Audit actual plaintext changes independent of nominal delta mask size.
+    # Important when the source is a lossy JPEG and the input has been
+    # converted to RGBA: compare decoded source pixels, not encoded file bytes.
+    _, np = _computer_vision()
+    original_pixels = np.asarray(asset.image().convert("RGBA"))
+    if mode == "A2":
+        decrypted_pixels = np.asarray(unseal_bytes(result_png, password).image().convert("RGBA"))
+        actual_change = np.any(original_pixels != decrypted_pixels, axis=2)
+        protected_arr = np.asarray(asset.mask.convert("L")) > 0
+        roi_arr = np.asarray(roi.convert("L")) > 0
+        actual_inside_protected = int(np.count_nonzero(actual_change & protected_arr))
+        actual_outside_roi = int(np.count_nonzero(actual_change & ~roi_arr))
+        actual_changed_pixels = int(np.count_nonzero(actual_change))
+        if actual_inside_protected or actual_outside_roi:
+            raise RuntimeError("A2 changed pixels outside its permitted region")
+    else:
+        actual_changed_pixels = 0
+        actual_inside_protected = 0
+        actual_outside_roi = 0
     protected = asset.mask.histogram()[255]
     report = {
-        "version":"VeilPNG v0.3.0", "mode":mode,"extraction":extraction,
+        "version":"VeilPNG v0.6.0", "mode":mode,"extraction":extraction,
         "threshold":threshold,"minimum_component_pixels":min_component_pixels,
+        "edge_guard_px":edge_guard_px,"actual_decrypted_changed_pixels":actual_changed_pixels,
         "geometry":reg_report,"editable_roi_pixels":roi_pixels,
         "eligible_unprotected_roi_pixels":allowed,"changed_pixels":changed,
         "changed_percent_of_whole":round(100*changed/total,4),
-        "protected_pixels":protected,"written_pixels_outside_roi":0,
-        "written_pixels_in_protected_area":0,
+        "protected_pixels":protected,"written_pixels_outside_roi":actual_outside_roi,
+        "written_pixels_in_protected_area":actual_inside_protected,
         "original_source_sha256":asset.source_sha256,
         "decrypted_source_sha256":unseal_bytes(result_png,password).source_sha256,
         "A1_original_byte_identical":mode=="A1",
-        "warning":"ROI-based color overlay extraction is not semantic editing; inspect edges, text, and alignment visually.",
+        "warning":"ROI-constrained pixel extraction is not semantic OCR; grayscale text and patch boundaries require visual review.",
     }
     return SmartEditResult(result_png,image_to_png_bytes(public_merged),image_to_png_bytes(delta_mask),report)

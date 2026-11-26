@@ -1,0 +1,4 @@
+import assert from 'node:assert/strict';import {restoreBoundary} from './return-boundary.mjs';import {maskFor} from './core.mjs';
+const w=120,h=100,m=maskFor(w,h,[{kind:'rect',a:[35,25],b:[85,75]}]);
+for(const shade of [0,255])for(const halo of [5,9,12]){const a=new Uint8Array(w*h*4),b=new Uint8Array(a.length);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let i=(y*w+x)*4;a.set([120+x%60,100+y%70,140,255],i);let d=Math.max(35-x,x-85,25-y,y-75,0);b.set(d<=halo?[shade,shade,shade,255]:a.subarray(i,i+4),i);}b.set([7,8,9,255],0);const r=restoreBoundary(a,b,m,w,h);assert.equal(r.halo,halo);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let i=(y*w+x)*4,d=Math.max(35-x,x-85,25-y,y-75,0);if(d<=halo)assert.deepEqual([...r.data.subarray(i,i+4)],[...a.subarray(i,i+4)]);if(d>24)assert.deepEqual([...r.data.subarray(i,i+4)],[...b.subarray(i,i+4)]);}const e=restoreBoundary(a,b,m,w,h,{exact:true});assert.equal(e.changed,0);}
+console.log('6 adaptive ring cases passed');
