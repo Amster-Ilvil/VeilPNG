@@ -20,7 +20,7 @@ export async function makePrivateBundle(pages,links){
  const record=workspaceRecord(pages,links),entries=[];
  for(let i=0;i<pages.length;i++){
   const f=pages[i].file,data=new Uint8Array(await f.arrayBuffer());
-  const ext=data[0]===137&&data[1]===80?'png':'jpg';
+  const ext=data[0]===137&&data[1]===80?'png':data[0]===82&&data[1]===73&&data[8]===87&&data[9]===69?'webp':'jpg';
   entries.push({name:'original_'+String(i+1).padStart(4,'0')+'.'+ext,data});
  }
  entries.push({name:'project.json',data:new TextEncoder().encode(JSON.stringify(record))});
@@ -45,6 +45,6 @@ export async function unpackPrivateBundle(blob,newPage){
  return {pages,links};
 }
 export function roleFromPublicName(name){
- const m=/^\d{4}_(CN|JP)_(?:redacted|returned)\.(?:png|jpe?g)$/i.exec(name);
+ const m=/^\d{4}_(CN|JP)_(?:redacted|returned)\.(?:png|jpe?g|webp)$/i.exec(name);
  return m?(m[1].toUpperCase()==='CN'?'中':'日'):'';
 }

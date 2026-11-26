@@ -1,12 +1,13 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.8.0";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.8.0";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.8.0";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.8.0";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.8.0";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.8.0";
-import {readPublicZip} from "./zip-read.mjs?v=0.8.0";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.8.0";
-import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.8.0";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.0";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.0";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.0";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.0";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.0";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.0";
+import {readPublicZip} from "./zip-read.mjs?v=0.9.0";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.0";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.0";
+import {webpDimensions} from "./webp.mjs?v=0.9.0";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -15,7 +16,7 @@ let restoredBlob=null,restoredURL=null,returnedURL=null,compareWidth=0;
 let alignment=null,links=[],partnerGeneration=0;
 const current=()=>pages[index];
 const marked=p=>p&&p.ops.length>0;
-function status(t){ui.status.textContent=t;}
+function status(t){ui.status.textContent=t;$("actionStatus").textContent=t;}
 function controls(){
   const p=current();for(const x of [ui.files,ui.clearAll,ui.tool,ui.radius,ui.shade])x.disabled=busy;
   ui.undo.disabled=busy||!p||!p.ops.length;ui.redo.disabled=busy||!p||!p.redo.length;ui.clearMask.disabled=busy||!p||!p.ops.length;
@@ -30,7 +31,9 @@ async function decode(file){
   const sig=new Uint8Array(await file.slice(0,24).arrayBuffer());
   const png=sig.length>=24&&[137,80,78,71,13,10,26,10].every((x,i)=>sig[i]===x);
   const jpg=sig.length>=3&&sig[0]===255&&sig[1]===216&&sig[2]===255;
-  if(!png&&!jpg)throw Error("仅支持真实 PNG/JPEG");
+  const webp=sig.length>=12&&String.fromCharCode(...sig.slice(0,4))==="RIFF"&&String.fromCharCode(...sig.slice(8,12))==="WEBP";
+  if(!png&&!jpg&&!webp)throw Error("仅支持真实 PNG/JPEG/WebP");
+  if(webp)webpDimensions(new Uint8Array(await file.arrayBuffer()));
   if(png){const d=new DataView(sig.buffer);const w=d.getUint32(16),h=d.getUint32(20);if(!w||!h||w*h>LIMIT||w>12000||h>12000)throw Error("PNG 尺寸超限");
     const raw=new Uint8Array(await file.arrayBuffer()),v=new DataView(raw.buffer);let i=8;
     while(i+12<=raw.length){const n=v.getUint32(i);if(n>raw.length-i-12)throw Error("PNG 数据不完整");if(raw[i+4]===97&&raw[i+5]===99&&raw[i+6]===84&&raw[i+7]===76)throw Error("不支持动画 PNG");i+=n+12;}
@@ -85,14 +88,16 @@ function syncReturnControls(){
   $("approvePair").disabled=busy||!restoredBlob||!pairIsCurrent(current());
   $("approvePair").checked=pairIsApproved(current());
   $("removePair").disabled=busy||!pairIsCurrent(current());
-  $("compareZoom").disabled=busy||!restoredBlob;
-  $("pairSummary").textContent="已配对 "+pages.filter(pairIsCurrent).length+" / "+pages.length+" 页 · 已确认 "+reviewed+" 页（仅导出已确认页面）";
+  $("compareZoom").disabled=busy||!pairIsCurrent(current());
+  $("restoreCurrent").disabled=busy||!pairIsCurrent(current());
+  $("restoreAll").disabled=busy||!pages.some(pairIsCurrent);
+  $("pairSummary").textContent="已导入 "+pages.filter(pairIsCurrent).length+" 页 · 已恢复 "+pages.filter(p=>pairIsCurrent(p)&&p.pair.composed).length+" 页 · 已确认 "+reviewed+" 页（仅导出已确认页面）";
 }
 function clearRestored(){
   restoredBlob=null;
   if(restoredURL)URL.revokeObjectURL(restoredURL);
   restoredURL=null;if(returnedURL)URL.revokeObjectURL(returnedURL);returnedURL=null;compareWidth=0;
-  $("restoredImage").removeAttribute("src");$("returnedImage").removeAttribute("src");$("returnPreview").hidden=true;
+  $("restoredImage").removeAttribute("src");$("restoredImage").hidden=true;$("restoreWaiting").hidden=false;$("returnedImage").removeAttribute("src");$("returnPreview").hidden=true;
 }
 $("saveRecord").onclick=()=>run(async()=>{
   const p=current();if(!p||!bitmap||!count)throw Error("没有有效遮盖选区");
@@ -145,20 +150,22 @@ function applyCompareZoom(){
 function presentPair(p,result){
   clearRestored();restoredBlob=result.blob;compareWidth=result.width;
   restoredURL=URL.createObjectURL(restoredBlob);returnedURL=URL.createObjectURL(result.alignedBlob||p.pair.file);
-  $("restoredImage").src=restoredURL;$("returnedImage").src=returnedURL;
+  $("restoredImage").src=restoredURL;$("restoredImage").hidden=false;$("restoreWaiting").hidden=true;$("returnedImage").src=returnedURL;
   $("returnPreview").hidden=false;applyCompareZoom();
   status("恢复 "+result.n+" 像素 · 配准误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
 }
-async function showPair(p){if(!pairIsCurrent(p))return;presentPair(p,await composePair(p,bitmap,p.pair.file));}
+async function showPair(p){if(!pairIsCurrent(p))return;if(p.pair.composed){presentPair(p,await composePair(p,bitmap,p.pair.file));}else{clearRestored();const b=await decode(p.pair.file);try{compareWidth=b.width;}finally{b.close();}returnedURL=URL.createObjectURL(p.pair.file);$("returnedImage").src=returnedURL;$("returnPreview").hidden=false;applyCompareZoom();status("返回图已导入："+p.pair.file.name+"。点击恢复遮盖区域。");}}
+$("restoreCurrent").onclick=()=>run(async()=>{const p=current();if(!pairIsCurrent(p))throw Error("先导入对应返回图");const result=await composePair(p,bitmap,p.pair.file);p.pair.composed=true;setPairApproval(p,false);presentPair(p,result);$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});});
+$("restoreAll").onclick=()=>run(async()=>{const ids=pages.flatMap((p,i)=>pairIsCurrent(p)?[i]:[]);if(!ids.length)throw Error("请先导入返回图");const results=[];for(const i of ids){const p=pages[i],b=await decode(p.file);try{status("正在恢复 "+(results.length+1)+"/"+ids.length);await composePair(p,b,p.pair.file);results.push(i);}finally{b.close();}}for(const i of results){pages[i].pair.composed=true;setPairApproval(pages[i],false);}await select(results[0]);status("已恢复 "+results.length+" 页，请逐页确认结果。");$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});});
 $("loadReturn").onclick=()=>$("returnFile").click();
 $("returnFile").onchange=()=>{const f=$("returnFile").files[0];$("returnFile").value="";if(!f)return;run(async()=>{
   const p=current();if(!p||!bitmap||!count)throw Error("请先准备原图及有效遮盖记录");
   if(p.pair&&!confirm("替换当前页回传图并重新确认？"))return;
   const total=pages.reduce((sum,q)=>sum+(q!==p&&pairIsCurrent(q)?q.pair.file.size:0),0);
   if(total+f.size>TOTAL)throw Error("回传队列超过 80 MB，请分批处理");
-  const result=await composePair(p,bitmap,f);attachPair(p,f);presentPair(p,result);
+  const b=await decode(f);try{const r=matchPublic(p,bitmap,b);projectedMask(maskFor(p.width,p.height,p.ops),p.width,p.height,b.width,b.height,r.matrix);}finally{b.close();}attachPair(p,f);await showPair(p);$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});
 });};
-$("approvePair").onchange=()=>{try{setPairApproval(current(),$("approvePair").checked);status($("approvePair").checked?"已确认当前页，可导出。":"已取消确认。");}catch(e){status(e.message);}controls();};
+$("approvePair").onchange=()=>{try{if(!restoredBlob||!current()?.pair?.composed)throw Error("请先恢复遮盖区域");setPairApproval(current(),$("approvePair").checked);status($("approvePair").checked?"已确认当前页，可导出。":"已取消确认。");}catch(e){status(e.message);}controls();};
 $("removePair").onclick=()=>{invalidatePair(current());clearRestored();status("当前回传图已移除。");controls();};
 $("compareZoom").onchange=applyCompareZoom;
 let syncTarget=null;
@@ -361,12 +368,12 @@ $("batchReturnFile").onchange=()=>{const input=Array.from($("batchReturnFile").f
  if(total>TOTAL)throw Error("回传队列超过 80 MB");
  if(!confirm("按画面匹配以下返回图（仍须逐页确认）：\n"+[...staged].map(([i,f])=>f.name+" → "+pages[i].file.name).join("\n")))return;
  for(const [i,f] of staged)attachPair(pages[i],f);
- await select(staged.keys().next().value);status("批量匹配完成，请逐页确认对应关系。");$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});
+ await select(staged.keys().next().value);status("批量匹配完成，点击恢复遮盖区域（全部），再逐页确认。");$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});
 });};
 
 function syncEasyControls(){
  const p=current(),n=pages.filter(marked).length,k=pages.filter(pairIsCurrent).length,reviewed=reviewedPages(pages).length;
- $("nextAction").textContent=!pages.length?"第一步：导入原图":!n?"在图片上拖动矩形选区":k>reviewed?"检查返回图，再确认当前页":reviewed?"已确认的结果可以导出":"标记完成后，保存项目并导出遮盖图片";
+ $("nextAction").textContent=!pages.length?"第一步：导入原图":!n?"在图片上拖动矩形选区":k>reviewed?(pages.some(p=>pairIsCurrent(p)&&!p.pair.composed)?"返回图已导入：点击恢复遮盖区域":"检查恢复结果，再确认当前页"):reviewed?"已确认的结果可以导出":"标记完成后，保存项目并导出遮盖图片";
  $("easyProgress").textContent="已导入 "+pages.length+" 张 · 有选区 "+n+" 张 · 已配对 "+k+" 张 · 已确认 "+reviewed+" 张";
  for(const id of ["importCN","importJP","easyResume"])$(id).disabled=busy;
  $("easyOpen").disabled=busy;$("easySave").disabled=$("saveProject").disabled;$("easyRecover").disabled=$("recoverMasks").disabled;
