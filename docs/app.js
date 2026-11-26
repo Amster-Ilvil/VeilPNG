@@ -1,10 +1,10 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.5.0";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.5.0";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.5.0";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.5.0";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.5.0";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.5.0";
-import {readPublicZip} from "./zip-read.mjs?v=0.5.0";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.6.0";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.6.0";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.6.0";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.6.0";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.6.0";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.6.0";
+import {readPublicZip} from "./zip-read.mjs?v=0.6.0";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -18,7 +18,7 @@ function controls(){
   const p=current();for(const x of [ui.files,ui.clearAll,ui.tool,ui.radius,ui.shade])x.disabled=busy;
   ui.undo.disabled=busy||!p||!p.ops.length;ui.redo.disabled=busy||!p||!p.redo.length;ui.clearMask.disabled=busy||!p||!p.ops.length;
   ui.exportOne.disabled=busy||!p||count===0;ui.exportAll.disabled=busy||!pages.some(marked);
-  syncReturnControls();syncProjectControls();
+  syncReturnControls();syncProjectControls();syncEasyControls();
   ui.queue.replaceChildren();
   pages.forEach((q,i)=>{const li=document.createElement("li"),b=document.createElement("button");b.type="button";b.textContent=(pairIsApproved(q)?"✓ ":pairIsCurrent(q)?"◐ ":marked(q)?"● ":"○ ")+"["+validRole(q.role)+"] "+q.file.name;b.disabled=busy;b.setAttribute("aria-current",String(i===index));b.onclick=()=>run(()=>select(i));li.append(b);ui.queue.append(li);});
 }
@@ -48,7 +48,7 @@ window.addEventListener("resize",fitCanvas);
 function render(){clearRestored();const p=current();if(!p||!bitmap)return;count=draw(bitmap,p,ui.preview);ui.gesture.width=bitmap.width;ui.gesture.height=bitmap.height;ui.gesture.getContext("2d").clearRect(0,0,bitmap.width,bitmap.height);
   ui.shade.value=String(p.shade);ui.stack.hidden=false;ui.empty.hidden=true;fitCanvas();status((index+1)+"/"+pages.length+" · "+bitmap.width+" × "+bitmap.height+" · 已遮盖 "+count+" 像素");controls();}
 async function select(i){clearAlignment();const b=await decode(pages[i].file);if(bitmap)bitmap.close();bitmap=b;index=i;render();const p=current();if(pairIsCurrent(p)){try{await showPair(p);}catch(e){invalidatePair(p);throw e;}}}
-ui.files.onchange=()=>{const incoming=Array.from(ui.files.files);ui.files.value="";run(async()=>{if(!incoming.length)return;if(pages.length+incoming.length>32||pages.reduce((s,p)=>s+p.file.size,0)+incoming.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error("队列超过容量限制");for(const f of incoming){if(f.size>MAX)throw Error("单文件超过 20 MB");}const staged=[];for(const f of incoming){staged.push(await newPage(f,$("importRole").value));}const old=pages.length;pages.push(...staged);if(index<0)await select(old);else controls();markDirty();});};
+ui.files.onchange=()=>{const incoming=Array.from(ui.files.files);ui.files.value="";run(async()=>{if(!incoming.length)return;if(pages.length+incoming.length>32||pages.reduce((s,p)=>s+p.file.size,0)+incoming.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error("队列超过容量限制");for(const f of incoming){if(f.size>MAX)throw Error("单文件超过 20 MB");}const staged=[];for(const f of incoming){staged.push(await newPage(f,$("importRole").value));}const old=pages.length;pages.push(...staged);await select(old);markDirty();});};
 function point(e){const r=ui.gesture.getBoundingClientRect();return [Math.max(0,Math.min(ui.gesture.width-1,Math.floor((e.clientX-r.left)*ui.gesture.width/r.width))),Math.max(0,Math.min(ui.gesture.height-1,Math.floor((e.clientY-r.top)*ui.gesture.height/r.height)))];}
 function guide(){const c=ui.gesture,x=c.getContext("2d");x.clearRect(0,0,c.width,c.height);if(!drag)return;const d=drag;x.strokeStyle="#e84a5f";x.fillStyle="#e84a5f";x.globalAlpha=.65;if(d.kind==="rect"){x.lineWidth=Math.max(2,c.width/500);x.strokeRect(d.a[0],d.a[1],d.b[0]-d.a[0],d.b[1]-d.a[1]);}else{x.lineWidth=d.radius*2;x.lineCap="round";x.lineJoin="round";x.beginPath();x.moveTo(...d.points[0]);for(const p of d.points)x.lineTo(...p);x.stroke();x.beginPath();x.arc(...d.points[0],d.radius,0,Math.PI*2);x.fill();}x.globalAlpha=1;}
 ui.gesture.onpointerdown=e=>{if(busy||!current()||drag||e.button!==0)return;e.preventDefault();const p=point(e),kind=ui.tool.value;drag=kind==="rect"?{kind,a:p,b:p}:{kind,radius:Math.max(1,Math.min(128,Math.round(Number(ui.radius.value)||12))),points:[p]};ui.gesture.setPointerCapture(e.pointerId);guide();};
@@ -65,7 +65,7 @@ function download(blob,name){const url=URL.createObjectURL(blob),a=document.crea
 const name=i=>String(i+1).padStart(4,"0")+"_redacted.png";
 async function exportPage(p){const b=await decode(p.file),c=document.createElement("canvas");try{if(!draw(b,p,c))return null;return await png(c);}finally{b.close();c.width=1;c.height=1;}}
 ui.exportOne.onclick=()=>run(async()=>{if($("autosave").checked)await flushCheckpoint();else if(!confirm("确认已保存项目记录并保留原图？"))return;const b=await exportPage(current());if(!b)throw Error("选区为空");download(b,name(index));status("当前 PNG 已生成");});
-ui.exportAll.onclick=()=>run(async()=>{if($("autosave").checked)await flushCheckpoint();else if(!confirm("确认已保存项目记录并保留原图？刷新可能丢失未保存选区。"))return;const entries=[];let size=0;for(let i=0;i<pages.length;i++){if(!marked(pages[i]))continue;status("正在编码 "+(i+1)+"/"+pages.length);const b=await exportPage(pages[i]);if(!b)continue;size+=b.size;if(size>128*1024*1024)throw Error("导出超过 128 MB，请分批处理");entries.push({name:name(i),data:new Uint8Array(await b.arrayBuffer())});}if(!entries.length)throw Error("没有有效遮盖选区");download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_redacted.zip");status("已生成 "+entries.length+" 张遮盖 PNG 的 ZIP");});
+ui.exportAll.onclick=()=>run(async()=>{if($("autosave").checked)await flushCheckpoint();else if(savedRevision!==revision){if(!confirm("先单独保存项目记录（私人文件），再导出公开图片？请允许浏览器下载两个独立文件。"))return;saveProjectRecord();}const entries=[];let size=0;for(let i=0;i<pages.length;i++){if(!marked(pages[i]))continue;status("正在编码 "+(i+1)+"/"+pages.length);const b=await exportPage(pages[i]);if(!b)continue;size+=b.size;if(size>128*1024*1024)throw Error("导出超过 128 MB，请分批处理");entries.push({name:name(i),data:new Uint8Array(await b.arrayBuffer())});}if(!entries.length)throw Error("没有有效遮盖选区");download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_redacted.zip");status("已生成 "+entries.length+" 张遮盖 PNG 的 ZIP；请检查私人项目记录和公开 ZIP 均已下载。");});
 
 function syncReturnControls(){
   $("saveRecord").disabled=busy||!current()||count===0;
@@ -186,7 +186,7 @@ $("exportBatch").onclick=()=>run(async()=>{
 async function newPage(file,role="其他"){
   const b=await decode(file);try{return {file,width:b.width,height:b.height,hash:await sourceHash(file),role:validRole(role),ops:[],redo:[],shade:0};}finally{b.close();}
 }
-let saveChain=Promise.resolve(),pending=false,revision=0;
+let saveChain=Promise.resolve(),pending=false,revision=0,savedRevision=-1;
 function cpStatus(t){$("checkpointStatus").textContent=t;}
 function syncProjectControls(){
   const p=current(),target=$("copyTarget"),old=target.value;
@@ -233,10 +233,8 @@ $("deleteCheckpoint").onclick=()=>run(async()=>{
   if(!confirm("删除浏览器保存的原图和选区备份？不会删除你的本地文件。"))return;
   $("autosave").checked=false;revision++;await saveChain.catch(()=>{});await checkpoint("delete");pending=false;cpStatus("浏览器备份已删除。");
 });
-$("saveProject").onclick=()=>run(async()=>{
-  const r=projectRecord(pages);download(new Blob([JSON.stringify(r)],{type:"application/json"}),"veilpng_local_project.json");
-  status("全部项目记录已生成：仅保存本地，需同时保留原图。");
-});
+function saveProjectRecord(){const r=projectRecord(pages);download(new Blob([JSON.stringify(r)],{type:"application/json"}),"veilpng_PRIVATE_local_project.json");savedRevision=revision;}
+$("saveProject").onclick=()=>run(async()=>{saveProjectRecord();status("项目记录下载已请求；请确认文件已保存，并同时保留原图。");});
 $("openProject").onclick=()=>$("projectFile").click();
 $("projectFile").onchange=()=>{const f=$("projectFile").files[0];$("projectFile").value="";if(!f)return;run(async()=>{
   if(f.size>64*1024*1024)throw Error("项目记录超限");
@@ -294,7 +292,12 @@ $("copyMask").onclick=()=>run(async()=>{
   q.ops=transferMask(p.ops,alignment.matrix,q.width,q.height);q.shade=p.shade;q.redo=[];invalidatePair(q);markDirty();
   await select(i);status("已迁移选区，请检查目标页完整覆盖后再导出。");
 });
-$("quickImport").onclick=()=>ui.files.click();
+$("quickImport").onclick=()=>{$("importRole").value="其他";ui.files.click();};
+$("importCN").onclick=()=>{$("importRole").value="中";ui.files.click();};
+$("importJP").onclick=()=>{$("importRole").value="日";ui.files.click();};
+$("easySave").onclick=()=>$("saveProject").click();
+$("easyResume").onclick=()=>$("resumeProject").click();
+$("easyRecover").onclick=()=>$("recoverMasks").click();
 $("quickExport").onclick=()=>ui.exportAll.click();
 $("quickReturn").onclick=()=>$("returnFile").click();
 $("quickRestore").onclick=()=>$("exportBatch").click();
@@ -337,6 +340,38 @@ $("batchReturnFile").onchange=()=>{const files=Array.from($("batchReturnFile").f
  if(total>TOTAL)throw Error("回传队列超过 80 MB");
  if(!confirm("按画面匹配以下返回图（仍须逐页确认）：\n"+[...staged].map(([i,f])=>f.name+" → "+pages[i].file.name).join("\n")))return;
  for(const [i,f] of staged)attachPair(pages[i],f);
- await select(staged.keys().next().value);status("批量匹配完成，请逐页确认对应关系。");
+ await select(staged.keys().next().value);status("批量匹配完成，请逐页确认对应关系。");$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});
 });};
+
+function syncEasyControls(){
+ const p=current(),n=pages.filter(marked).length,k=pages.filter(pairIsCurrent).length,reviewed=reviewedPages(pages).length;
+ $("nextAction").textContent=!pages.length?"第一步：导入原图":!n?"在图片上拖动矩形选区":k>reviewed?"检查返回图，再确认当前页":reviewed?"已确认的结果可以导出":"标记完成后，保存项目并导出遮盖图片";
+ $("easyProgress").textContent="已导入 "+pages.length+" 张 · 有选区 "+n+" 张 · 已配对 "+k+" 张 · 已确认 "+reviewed+" 张";
+ for(const id of ["importCN","importJP","easyResume"])$(id).disabled=busy;
+ $("easySave").disabled=$("saveProject").disabled;$("easyRecover").disabled=$("recoverMasks").disabled;
+ $("easyMatch").disabled=busy||!p||!["中","日"].includes(p.role)||!pages.some(q=>q!==p&&["中","日"].includes(q.role)&&q.role!==p.role);
+ $("easyTransfer").disabled=$("copyMask").disabled;
+ $("nextReview").disabled=busy||!restoredBlob||!pairIsCurrent(p);
+}
+$("easyMatch").onclick=()=>run(async()=>{
+ const p=current();if(!p||!bitmap)throw Error("先导入原图");
+ clearAlignment();const hits=[];
+ for(let i=0;i<pages.length;i++){const q=pages[i];if(q===p||!["中","日"].includes(q.role)||q.role===p.role)continue;
+  status("正在查找对应页："+q.file.name);
+  const b=await decode(q.file);try{try{hits.push({i,...registerImages(bitmap,b)});}catch{}}finally{b.close();}
+ }
+ const r=chooseMatch(hits),q=pages[r.i];$("copyTarget").value=String(r.i);alignment={source:p,target:q,matrix:r.matrix};
+ const b=await decode(q.file);try{showAlignment(bitmap,b,r.matrix);}finally{b.close();}
+ $("registrationStatus").textContent="已找到对应页："+q.file.name+"，配准误差 "+r.pixelMedian.toFixed(2)+" px。";
+ $("easyMatchHint").textContent="候选："+q.file.name+"。请查看叠加图，再确认迁移。";
+ status("已识别候选同页，请检查叠加位置。");$("registrationPanel").scrollIntoView({block:"nearest",behavior:"smooth"});
+});
+$("easyTransfer").onclick=()=>$("copyMask").click();
+$("nextReview").onclick=()=>run(async()=>{
+ const p=current();if(!p||!restoredBlob||!pairIsCurrent(p))throw Error("没有可确认的预览");
+ if(!confirm("确认当前页的对应关系及恢复预览正确？"))return;
+ setPairApproval(p,true);const next=pages.findIndex(q=>pairIsCurrent(q)&&!pairIsApproved(q));
+ if(next>=0){await select(next);$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});}
+ else status("所有已配对页均已确认，可以导出已确认结果。");
+});
 controls();
