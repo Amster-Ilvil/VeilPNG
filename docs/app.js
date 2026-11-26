@@ -1,12 +1,14 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.3.0";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.3.0";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.3.0";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.3.0";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.4.0";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.4.0";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.4.0";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.4.0";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.4.0";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
 let pages=[],index=-1,bitmap=null,busy=false,drag=null,count=0;
 let restoredBlob=null,restoredURL=null,returnedURL=null,compareWidth=0;
+let alignment=null;
 const current=()=>pages[index];
 const marked=p=>p&&p.ops.length>0;
 function status(t){ui.status.textContent=t;}
@@ -43,7 +45,7 @@ function fitCanvas(){if(!bitmap)return;const w=Math.max(1,ui.stack.parentElement
 window.addEventListener("resize",fitCanvas);
 function render(){clearRestored();const p=current();if(!p||!bitmap)return;count=draw(bitmap,p,ui.preview);ui.gesture.width=bitmap.width;ui.gesture.height=bitmap.height;ui.gesture.getContext("2d").clearRect(0,0,bitmap.width,bitmap.height);
   ui.shade.value=String(p.shade);ui.stack.hidden=false;ui.empty.hidden=true;fitCanvas();status((index+1)+"/"+pages.length+" · "+bitmap.width+" × "+bitmap.height+" · 已遮盖 "+count+" 像素");controls();}
-async function select(i){const b=await decode(pages[i].file);if(bitmap)bitmap.close();bitmap=b;index=i;render();const p=current();if(pairIsCurrent(p)){try{await showPair(p);}catch(e){invalidatePair(p);throw e;}}}
+async function select(i){clearAlignment();const b=await decode(pages[i].file);if(bitmap)bitmap.close();bitmap=b;index=i;render();const p=current();if(pairIsCurrent(p)){try{await showPair(p);}catch(e){invalidatePair(p);throw e;}}}
 ui.files.onchange=()=>{const incoming=Array.from(ui.files.files);ui.files.value="";run(async()=>{if(!incoming.length)return;if(pages.length+incoming.length>32||pages.reduce((s,p)=>s+p.file.size,0)+incoming.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error("队列超过容量限制");for(const f of incoming){if(f.size>MAX)throw Error("单文件超过 20 MB");}const staged=[];for(const f of incoming){staged.push(await newPage(f,$("importRole").value));}const old=pages.length;pages.push(...staged);if(index<0)await select(old);else controls();markDirty();});};
 function point(e){const r=ui.gesture.getBoundingClientRect();return [Math.max(0,Math.min(ui.gesture.width-1,Math.floor((e.clientX-r.left)*ui.gesture.width/r.width))),Math.max(0,Math.min(ui.gesture.height-1,Math.floor((e.clientY-r.top)*ui.gesture.height/r.height)))];}
 function guide(){const c=ui.gesture,x=c.getContext("2d");x.clearRect(0,0,c.width,c.height);if(!drag)return;const d=drag;x.strokeStyle="#e84a5f";x.fillStyle="#e84a5f";x.globalAlpha=.65;if(d.kind==="rect"){x.lineWidth=Math.max(2,c.width/500);x.strokeRect(d.a[0],d.a[1],d.b[0]-d.a[0],d.b[1]-d.a[1]);}else{x.lineWidth=d.radius*2;x.lineCap="round";x.lineJoin="round";x.beginPath();x.moveTo(...d.points[0]);for(const p of d.points)x.lineTo(...p);x.stroke();x.beginPath();x.arc(...d.points[0],d.radius,0,Math.PI*2);x.fill();}x.globalAlpha=1;}
@@ -55,7 +57,7 @@ ui.undo.onclick=()=>{if(current()?.ops.length){current().redo.push(current().ops
 ui.redo.onclick=()=>{if(current()?.redo.length){current().ops.push(current().redo.pop());invalidatePair(current());render();markDirty();}};
 ui.clearMask.onclick=()=>{if(current()&&confirm("清空本页选区？")){current().ops=[];current().redo=[];invalidatePair(current());render();markDirty();}};
 ui.shade.onchange=()=>{if(current()){current().shade=Number(ui.shade.value);invalidatePair(current());render();markDirty();}};
-ui.clearAll.onclick=()=>{if(!pages.length||confirm("清空全部图片和选区？")){if(bitmap)bitmap.close();bitmap=null;clearRestored();pages=[];index=-1;count=0;drag=null;ui.stack.hidden=true;ui.empty.hidden=false;for(const c of [ui.preview,ui.gesture]){c.width=1;c.height=1;}status("尚未导入图片");controls();markDirty();}};
+ui.clearAll.onclick=()=>{if(!pages.length||confirm("清空全部图片和选区？")){if(bitmap)bitmap.close();bitmap=null;clearRestored();clearAlignment();pages=[];index=-1;count=0;drag=null;ui.stack.hidden=true;ui.empty.hidden=false;for(const c of [ui.preview,ui.gesture]){c.width=1;c.height=1;}status("尚未导入图片");controls();markDirty();}};
 function png(c){return new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(Error("PNG 编码失败")),"image/png"));}
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 const name=i=>String(i+1).padStart(4,"0")+"_redacted.png";
@@ -99,14 +101,22 @@ $("recordFile").onchange=()=>{const f=$("recordFile").files[0];$("recordFile").v
 async function composePair(p,source,returnedFile){
   const b=await decode(returnedFile),c=document.createElement("canvas");
   try{
-    if(b.width!==source.width||b.height!==source.height)throw Error("回传图尺寸不一致，请先在本地配准");
-    c.width=b.width;c.height=b.height;const x=c.getContext("2d",{alpha:false,willReadFrequently:true});
+    c.width=source.width;c.height=source.height;const x=c.getContext("2d",{alpha:false,willReadFrequently:true});
     x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(source,0,0);
     const original=x.getImageData(0,0,c.width,c.height);
-    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(b,0,0);
+    let aligned=false;
+    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);
+    if(b.width!==source.width||b.height!==source.height){
+      const publicCanvas=document.createElement("canvas");try{draw(source,p,publicCanvas);const r=registerImages(publicCanvas,b),m=invert(r.matrix);
+        const corners=[[0,0],[source.width-1,0],[0,source.height-1],[source.width-1,source.height-1]].map(z=>transform(r.matrix,...z));
+        if(corners.some(([u,v])=>u< -5||v< -5||u>b.width+4||v>b.height+4))throw Error("返回图裁切了原图边缘，拒绝自动恢复");
+        x.setTransform(m[0],m[1],-m[1],m[0],m[2],m[3]);x.drawImage(b,0,0);x.setTransform(1,0,0,1,0,0);aligned=true;
+      }finally{publicCanvas.width=publicCanvas.height=1;}
+    }else x.drawImage(b,0,0);
+    const alignedBlob=aligned?await png(c):null;
     const returned=x.getImageData(0,0,c.width,c.height),mask=maskFor(c.width,c.height,p.ops);
     const n=restoreRGBA(original.data,returned.data,mask);x.putImageData(returned,0,0);
-    return {blob:await png(c),n,width:b.width};
+    return {blob:await png(c),n,width:source.width,alignedBlob};
   }finally{b.close();c.width=1;c.height=1;}
 }
 function applyCompareZoom(){
@@ -118,7 +128,7 @@ function applyCompareZoom(){
 }
 function presentPair(p,result){
   clearRestored();restoredBlob=result.blob;compareWidth=result.width;
-  restoredURL=URL.createObjectURL(restoredBlob);returnedURL=URL.createObjectURL(p.pair.file);
+  restoredURL=URL.createObjectURL(restoredBlob);returnedURL=URL.createObjectURL(result.alignedBlob||p.pair.file);
   $("restoredImage").src=restoredURL;$("returnedImage").src=returnedURL;
   $("returnPreview").hidden=false;applyCompareZoom();
   status("恢复 "+result.n+" 像素；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
@@ -178,7 +188,8 @@ function syncProjectControls(){
   $("pageRole").value=validRole(p?.role);
   for(const id of ["quickImport","importRole","autosave","resumeProject","deleteCheckpoint"])$(id).disabled=busy;
   $("pageRole").disabled=busy||!p;$("copyTarget").disabled=busy||!p||pages.length<2;
-  $("copyMask").disabled=busy||!p||!count||!target.value;
+  $("registerPair").disabled=busy||!p||!target.value;
+  $("copyMask").disabled=busy||!p||!count||!validAlignment();
   $("saveProject").disabled=busy||!pages.length;$("openProject").disabled=busy||!pages.length;
   $("quickExport").disabled=ui.exportAll.disabled;$("quickReturn").disabled=$("loadReturn").disabled;
   $("quickBatchReturn").disabled=busy||!pages.some(marked);$("quickRestore").disabled=$("exportBatch").disabled;
@@ -226,13 +237,54 @@ $("projectFile").onchange=()=>{const f=$("projectFile").files[0];$("projectFile"
   pages=matched;await select(0);markDirty();status("项目记录已恢复，所有原图 SHA-256 均匹配。");
 });};
 $("pageRole").onchange=()=>{if(current()){current().role=validRole($("pageRole").value);controls();markDirty();}};
-$("copyTarget").onchange=()=>{$("copyMask").disabled=busy||!current()||!count||!$("copyTarget").value;};
+function grayThumbnail(source){
+  const scale=600/source.height,w=Math.round(source.width*scale);
+  if(w>1600||w<30)throw Error("图片比例超出自动配准范围");
+  const c=document.createElement("canvas");c.width=w;c.height=600;
+  const x=c.getContext("2d",{alpha:false,willReadFrequently:true});
+  x.fillStyle="#fff";x.fillRect(0,0,w,600);x.imageSmoothingQuality="high";x.drawImage(source,0,0,w,600);
+  const rgba=x.getImageData(0,0,w,600).data,data=new Uint8Array(w*600);
+  for(let i=0;i<data.length;i++)data[i]=Math.round(.299*rgba[4*i]+.587*rgba[4*i+1]+.114*rgba[4*i+2]);
+  c.width=c.height=1;return {w,h:600,scale,data};
+}
+function registerImages(source,target){
+  const a=grayThumbnail(source),b=grayThumbnail(target),r=registerGray(a,b);
+  return {...r,matrix:toPixels(r.matrix,a.scale,b.scale),pixelMedian:r.median/b.scale};
+}
+function clearAlignment(){
+  alignment=null;$("registrationPanel").hidden=true;
+  const c=$("registrationPreview");c.width=c.height=1;
+  $("registrationStatus").textContent="请选择目标图并自动配准";
+}
+function validAlignment(){return !!(alignment&&alignment.source===current()&&alignment.target===pages[Number($("copyTarget").value)]&&$("copyTarget").value!=="");}
+function showAlignment(source,target,m){
+  const c=$("registrationPreview"),scale=Math.min(1,900/target.height,900/target.width);
+  c.width=Math.max(1,Math.round(target.width*scale));c.height=Math.max(1,Math.round(target.height*scale));
+  const x=c.getContext("2d",{alpha:false,willReadFrequently:true});
+  x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(target,0,0,c.width,c.height);
+  const a=x.getImageData(0,0,c.width,c.height);
+  x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);
+  x.setTransform(m[0]*scale,m[1]*scale,-m[1]*scale,m[0]*scale,m[2]*scale,m[3]*scale);x.drawImage(source,0,0);x.setTransform(1,0,0,1,0,0);
+  const b=x.getImageData(0,0,c.width,c.height);
+  for(let i=0;i<a.data.length;i+=4){const u=Math.round((a.data[i]+a.data[i+1]+a.data[i+2])/3),v=Math.round((b.data[i]+b.data[i+1]+b.data[i+2])/3);a.data[i]=u;a.data[i+1]=v;a.data[i+2]=u;}
+  x.putImageData(a,0,0);$("registrationPanel").hidden=false;
+}
+$("copyTarget").onchange=()=>{clearAlignment();controls();};
+$("registerPair").onclick=()=>run(async()=>{
+  const p=current(),raw=$("copyTarget").value,q=pages[Number(raw)];
+  if(!p||!q||!raw||p===q)throw Error("请选择目标图");
+  clearAlignment();const b=await decode(q.file);
+  try{const r=registerImages(bitmap,b);alignment={source:p,target:q,matrix:r.matrix};
+    showAlignment(bitmap,b,r.matrix);$("registrationStatus").textContent="配准完成：内点 "+r.inliers+"/"+r.matches+"；中位误差 "+r.pixelMedian.toFixed(2)+" px。请检查叠加。";
+    status("配准完成，请检查叠加预览。");
+  }finally{b.close();}
+});
 $("copyMask").onclick=()=>run(async()=>{
-  const p=current(),raw=$("copyTarget").value,i=Number(raw),q=pages[i];
-  if(!raw||!p||!q||i===index||!count)throw Error("请选择目标页");
-  if(p.width!==q.width||p.height!==q.height)throw Error("中日图片尺寸不同，请分别标记");
-  if(!confirm("确认两张图已对齐？将替换目标页选区，请在目标页检查是否完整覆盖。"))return;
-  q.ops=structuredClone(p.ops);q.shade=p.shade;q.redo=[];invalidatePair(q);markDirty();await select(i);status("已复制选区，请检查目标页覆盖位置。");
+  if(!validAlignment()||!count)throw Error("请先完成配准与选区标记");
+  const p=current(),q=alignment.target,i=pages.indexOf(q);
+  if(!confirm("确认配准预览无明显错位？将替换目标页选区，请务必在目标图检查并修正。"))return;
+  q.ops=transferMask(p.ops,alignment.matrix,q.width,q.height);q.shade=p.shade;q.redo=[];invalidatePair(q);markDirty();
+  await select(i);status("已迁移选区，请检查目标页完整覆盖后再导出。");
 });
 $("quickImport").onclick=()=>ui.files.click();
 $("quickExport").onclick=()=>ui.exportAll.click();
@@ -242,7 +294,7 @@ $("quickBatchReturn").onclick=()=>$("batchReturnFile").click();
 $("batchReturnFile").onchange=()=>{const files=Array.from($("batchReturnFile").files);$("batchReturnFile").value="";if(!files.length)return;run(async()=>{
   if(files.length>32)throw Error("回传图最多 32 张");
   const staged=new Map();
-  for(const f of files){const i=returnIndex(f.name,pages.length),p=pages[i];if(staged.has(i)||!marked(p))throw Error("重复页码或无选区："+f.name);const b=await decode(f);try{if(b.width!==p.width||b.height!==p.height)throw Error("尺寸不一致："+f.name);}finally{b.close();}if(!maskFor(p.width,p.height,p.ops).some(Boolean))throw Error("选区为空："+f.name);staged.set(i,f);}
+  for(const f of files){const i=returnIndex(f.name,pages.length),p=pages[i];if(staged.has(i)||!marked(p))throw Error("重复页码或无选区："+f.name);const b=await decode(f);try{if(b.width!==p.width||b.height!==p.height){const source=await decode(p.file);try{await composePair(p,source,f);}finally{source.close();}}}finally{b.close();}if(!maskFor(p.width,p.height,p.ops).some(Boolean))throw Error("选区为空："+f.name);staged.set(i,f);}
   const total=pages.reduce((n,p,i)=>n+(staged.has(i)?staged.get(i).size:pairIsCurrent(p)?p.pair.file.size:0),0);
   if(total>TOTAL)throw Error("回传队列超过 80 MB");
   if(!confirm("按公开图编号配对 "+staged.size+" 张返回图？请逐页检查，全部为待确认。"))return;
