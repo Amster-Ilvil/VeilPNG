@@ -2,3 +2,5 @@
 #stack canvas{width:100%;height:100%;max-width:none;max-height:none;object-fit:fill}
 
 .return-panel{border-top:1px solid #d9e4ef;padding-top:12px}.return-panel h2{font-size:16px;margin:0}.return-panel h3{font-size:14px}.restored-image{display:block;max-width:100%;max-height:64vh;object-fit:contain;margin:8px auto;background:white}
+
+.return-review{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 12px}.return-review label{font-size:13px}.compare-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.compare-grid h3{margin:0 0 6px}.compare-viewport{height:min(54vh,620px);overflow:auto;background:#e2e9f3;border:1px solid #d9e4ef;border-radius:8px}.compare-image{display:block;width:100%;height:auto;max-width:100%}@media(max-width:720px){.compare-grid{grid-template-columns:1fr}.compare-viewport{height:42vh}}
