@@ -1,18 +1,19 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.3";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.3";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.3";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.3";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.3";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.3";
-import {readPublicZip} from "./zip-read.mjs?v=0.9.3";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.3";
-import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.3";
-import {webpDimensions} from "./webp.mjs?v=0.9.3";
-import {rectanglePlan} from "./local-rect.mjs?v=0.9.3";
-import {matchPatchTone} from "./tone.mjs?v=0.9.3";
-import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.3";
-import {cleanMaskFringe} from "./fringe.mjs?v=0.9.3";
-import {preferPairedReference} from "./paired-reference.mjs?v=0.9.3";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.4";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.4";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.4";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.4";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.4";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.4";
+import {readPublicZip} from "./zip-read.mjs?v=0.9.4";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.4";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.4";
+import {webpDimensions} from "./webp.mjs?v=0.9.4";
+import {rectanglePlan} from "./local-rect.mjs?v=0.9.4";
+import {matchPatchTone} from "./tone.mjs?v=0.9.4";
+import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.4";
+import {cleanMaskFringe} from "./fringe.mjs?v=0.9.4";
+import {preferPairedReference} from "./paired-reference.mjs?v=0.9.4";
+import {repairJoinLines} from "./join-lines.mjs?v=0.9.4";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -155,10 +156,15 @@ async function composeUsingSource(p,source,returnedFile){
            const sourcePixels=px.getImageData(0,0,patch.width,patch.height),ref=ctx.getImageData(dst[0]-pad,dst[1]-pad,patch.width,patch.height);
            const geo=alignPatchContext(sourcePixels.data,ref.data,patch.width,patch.height,pad);
            const tone=matchPatchTone(geo.data,ref.data,patch.width,patch.height,pad);
-           sourcePixels.data.set(tone.data);let fringeCount=0;
-           if($("fringeCleanup").checked){const fringe=cleanMaskFringe(sourcePixels.data,ref.data,patch.width,patch.height,pad,p.shade);ref.data.set(fringe.data);ctx.putImageData(ref,dst[0]-pad,dst[1]-pad,pad-2,pad-2,dw+4,dh+4);fringeCount=fringe.changed;}
-           ctx.putImageData(sourcePixels,dst[0]-pad,dst[1]-pad,pad,pad,dw,dh);
-           tones.push({applied:tone.applied,geometry:geo.applied,before:tone.before,after:tone.after,contextCorrelation:geo.after,fringe:fringeCount,warning:tone.after===null||tone.after>18});
+           sourcePixels.data.set(tone.data);let fringeCount=0,joinCount=0;
+           const merged=new Uint8ClampedArray(ref.data);
+           if($("fringeCleanup").checked){const fringe=cleanMaskFringe(sourcePixels.data,ref.data,patch.width,patch.height,pad,p.shade);merged.set(fringe.data);fringeCount=fringe.changed;}
+           for(let y=pad;y<pad+dh;y++){const start=(y*patch.width+pad)*4;merged.set(sourcePixels.data.subarray(start,start+dw*4),start);}
+           if($("fringeCleanup").checked){const repaired=repairJoinLines(merged,patch.width,patch.height,[pad,pad,pad+dw-1,pad+dh-1]);merged.set(repaired.data);joinCount=repaired.changed;}
+           ref.data.set(merged);
+           const halo=$("fringeCleanup").checked?2:0;
+           ctx.putImageData(ref,dst[0]-pad,dst[1]-pad,pad-halo,pad-halo,dw+2*halo,dh+2*halo);
+           tones.push({applied:tone.applied,geometry:geo.applied,before:tone.before,after:tone.after,contextCorrelation:geo.after,fringe:fringeCount,join:joinCount,warning:tone.after===null||tone.after>18});
          }finally{patch.width=patch.height=1;}
        }n+=dw*dh;
      }}finally{original.width=original.height=1;}
@@ -208,7 +214,7 @@ function presentPair(p,result){
   restoredURL=URL.createObjectURL(restoredBlob);returnedURL=URL.createObjectURL(result.alignedBlob||p.pair.file);
   $("restoredImage").src=restoredURL;$("restoredImage").hidden=false;$("restoreWaiting").hidden=true;$("returnedImage").src=returnedURL;
   $("returnPreview").hidden=false;applyCompareZoom();
-  status("恢复 "+result.n+" 像素 · "+(result.sourceLabel||"对应原图")+(result.referenceNote?" · "+result.referenceNote:"")+(result.tones?" · 窄边清理 "+result.tones.reduce((n,t)=>n+(t.fringe||0),0)+" 像素":"")+" · "+(result.localRects?"局部矩形 "+result.localRects+" 处":"全局映射（请仔细核对）")+(result.tones?" · 色调校正 "+result.tones.filter(t=>t.applied).length+" 处 · 位移校正 "+result.tones.filter(t=>t.geometry).length+" 处"+(result.tones.some(t=>t.warning)?" · 注意：部分接缝仍不可靠，须人工检查":""):"")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
+  status("恢复 "+result.n+" 像素 · "+(result.sourceLabel||"对应原图")+(result.referenceNote?" · "+result.referenceNote:"")+(result.tones?" · 窄边清理 "+result.tones.reduce((n,t)=>n+(t.fringe||0),0)+" 像素 · 接缝细线修正 "+result.tones.reduce((n,t)=>n+(t.join||0),0)+" 像素":"")+" · "+(result.localRects?"局部矩形 "+result.localRects+" 处":"全局映射（请仔细核对）")+(result.tones?" · 色调校正 "+result.tones.filter(t=>t.applied).length+" 处 · 位移校正 "+result.tones.filter(t=>t.geometry).length+" 处"+(result.tones.some(t=>t.warning)?" · 注意：部分接缝仍不可靠，须人工检查":""):"")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
 }
 async function showPair(p){if(!pairIsCurrent(p))return;if(p.pair.composed){presentPair(p,await composePair(p,bitmap,p.pair.file));}else{clearRestored();const b=await decode(p.pair.file);try{compareWidth=b.width;}finally{b.close();}returnedURL=URL.createObjectURL(p.pair.file);$("returnedImage").src=returnedURL;$("returnPreview").hidden=false;applyCompareZoom();status("返回图已导入："+p.pair.file.name+"。点击恢复遮盖区域。");}}
 $("restoreCurrent").onclick=()=>run(async()=>{const p=current();if(!pairIsCurrent(p))throw Error("先导入对应返回图");const result=await composePair(p,bitmap,p.pair.file);p.pair.composed=true;setPairApproval(p,false);presentPair(p,result);$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});});
