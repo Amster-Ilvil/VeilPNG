@@ -52,3 +52,6 @@ Static WebP is supported for originals, direct return imports, ZIP return import
 
 ## Web 0.9.1
 For disjoint rectangular selections, inspect solid-color returned regions near the global prediction, require dense rectangular support and bounded size deviation, and map each original rectangle independently to its observed bounds. Uncertain rectangular geometry fails closed rather than expanding a mask. Brush/eraser selections retain the global mapping and manual review. This is rectangle-local resampling, not nonrigid page registration. Batch source ambiguity now asks the user to choose a plausible candidate explicitly. No images are transmitted. Tests use synthetic rectangles; source choice and final visual review remain mandatory.
+
+## Web 0.9.2
+Local context correction estimates a bounded small translation and conservative RGB tone mapping from the visible ring outside a rectangular patch. Both use held-out context samples to reject unhelpful corrections. Very dark original pixels are protected by a tone gate. Only the destination rectangle is written; large, edge-adjacent or overlapping-context patches skip correction. High residual context error produces a manual-review warning. This is not non-rigid registration, inpainting or guaranteed seamless fusion. Tests: node docs/tone.test.mjs and node docs/patch-geometry.test.mjs. No user images included.
