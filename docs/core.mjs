@@ -16,11 +16,11 @@ function redactRGBA(data,mask,shade){
 
 function crc32(bytes){let c=0xffffffff;for(const b of bytes){c^=b;for(let i=0;i<8;i++)c=(c>>>1)^((c&1)?0xedb88320:0);}return(c^0xffffffff)>>>0;}
 
-function zipStore(entries){
+function zipStore(entries,mode='public'){
   const chunks=[],central=[],seen=new Set();let offset=0,cs=0;
   for(const e of entries){
     const name=Uint8Array.from(e.name,c=>c.charCodeAt(0));const data=e.data;
-    if(!/^[0-9]{4}_(?:(?:CN|JP)_redacted|redacted|restored)\.png$/.test(e.name)||seen.has(e.name))throw Error("Invalid or duplicate output filename");seen.add(e.name);
+    if(!(mode==="private"?/^(?:project\.json|original_[0-9]{4}\.(?:png|jpg))$/:/^[0-9]{4}_(?:(?:CN|JP)_redacted|redacted|restored)\.png$/).test(e.name)||seen.has(e.name))throw Error("Invalid or duplicate output filename");seen.add(e.name);
     const crc=crc32(data),a=new Uint8Array(30+name.length),v=new DataView(a.buffer);
     v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(12,33,true);v.setUint32(14,crc,true);v.setUint32(18,data.length,true);v.setUint32(22,data.length,true);v.setUint16(26,name.length,true);a.set(name,30);
     const b=new Uint8Array(46+name.length),z=new DataView(b.buffer);

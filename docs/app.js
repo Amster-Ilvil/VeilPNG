@@ -1,11 +1,12 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.7.0";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.7.0";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.7.0";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.7.0";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.7.0";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.7.0";
-import {readPublicZip} from "./zip-read.mjs?v=0.7.0";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.7.0";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.8.0";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.8.0";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.8.0";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.8.0";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.8.0";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.8.0";
+import {readPublicZip} from "./zip-read.mjs?v=0.8.0";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.8.0";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.8.0";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -68,10 +69,10 @@ async function exportPage(p){const b=await decode(p.file),c=document.createEleme
 ui.exportOne.onclick=()=>run(async()=>{if(bilingual(current()))throw Error("中日图片请一起导出 ZIP");if($("autosave").checked)await flushCheckpoint();else if(!confirm("确认已保存项目记录并保留原图？"))return;const b=await exportPage(current());if(!b)throw Error("选区为空");download(b,name(index));status("当前 PNG 已生成");});
 ui.exportAll.onclick=()=>run(async()=>{
  const plan=exportPlan(pages,links);
- if($("autosave").checked)await flushCheckpoint();else if(savedRevision!==revision){if(!confirm("先单独保存私人项目记录，再导出公开 ZIP？请允许两个独立下载。"))return;saveProjectRecord();}
+ if($("autosave").checked)await flushCheckpoint();else if(savedRevision!==revision){if(!confirm("同时下载私人完整工程 ZIP 和公开中日 ZIP？私人包包含原图，仅供本地恢复，请勿外传。"))return;await saveProjectRecord();}
  const entries=[];let size=0;
  for(const {page,name:filename} of plan){status("正在编码 "+filename);const b=await exportPage(page);if(!b)throw Error("选区失效，整批取消");size+=b.size;if(size>128*1024*1024)throw Error("导出超过 128 MB，请分批处理");entries.push({name:filename,data:new Uint8Array(await b.arrayBuffer())});}
- download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_CN_JP_redacted.zip");status("已生成一个 ZIP，包含 "+entries.length+" 张遮盖 PNG；私人项目记录单独保存。");
+ download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_CN_JP_redacted.zip");status("已生成一个公开 ZIP，包含 "+entries.length+" 张遮盖 PNG；私人完整工程单独保存。");
 });
 
 function syncReturnControls(){
@@ -205,7 +206,7 @@ function syncProjectControls(){
   $("pageRole").disabled=busy||!p;$("copyTarget").disabled=busy||!p||pages.length<2;
   $("registerPair").disabled=busy||!p||!target.value;
   $("copyMask").disabled=busy||!p||!validAlignment()||!opposite(p,alignment?.target);
-  $("saveProject").disabled=busy||!pages.length;$("openProject").disabled=busy||!pages.length;
+  $("saveProject").disabled=busy||!pages.length;$("openProject").disabled=busy;
   $("quickExport").disabled=ui.exportAll.disabled;$("quickReturn").disabled=$("loadReturn").disabled;
   $("quickBatchReturn").disabled=busy||!pages.some(marked);$("returnRole").disabled=busy;$("recoverMasks").disabled=busy||!pages.length;$("quickRestore").disabled=$("exportBatch").disabled;
 }
@@ -216,7 +217,7 @@ function markDirty(){
 }
 function flushCheckpoint(){
   if(!$("autosave").checked)return Promise.resolve();
-  const rev=revision,record=pages.length?projectRecord(pages):null,files=pages.map(p=>p.file);
+  const rev=revision,record=pages.length?workspaceRecord(pages,links):null,files=pages.map(p=>p.file);
   pending=true;cpStatus("正在保存本地备份…");
   const job=saveChain.catch(()=>{}).then(()=>record?checkpoint("put",{record,files}):checkpoint("delete"));
   saveChain=job;
@@ -234,20 +235,29 @@ $("resumeProject").onclick=()=>run(async()=>{
   if(!saved?.record||!Array.isArray(saved.files)||saved.files.length>32||saved.files.reduce((n,f)=>n+(f?.size||0),0)>TOTAL)throw Error("没有可恢复的本地备份");
   if(pages.length&&!confirm("恢复备份将替换当前队列，继续？"))return;
   const staged=[];for(const f of saved.files){if(!(f instanceof File))throw Error("本地备份文件无效");staged.push(await newPage(f));}
-  const matched=matchProject(saved.record,staged);links=[];pages=matched;await select(0);cpStatus("已恢复全部原图、分组和选区；请重新导入回传图。");
+  const matched=matchProject(saved.record,staged),restoredLinks=restoreLinks(saved.record,matched);links=restoredLinks;pages=matched;await select(0);cpStatus("已恢复全部原图、分组和选区；请重新导入回传图。");
 });
 $("deleteCheckpoint").onclick=()=>run(async()=>{
   if(!confirm("删除浏览器保存的原图和选区备份？不会删除你的本地文件。"))return;
   $("autosave").checked=false;revision++;await saveChain.catch(()=>{});await checkpoint("delete");pending=false;cpStatus("浏览器备份已删除。");
 });
-function saveProjectRecord(){const r=projectRecord(pages);download(new Blob([JSON.stringify(r)],{type:"application/json"}),"veilpng_PRIVATE_local_project.json");savedRevision=revision;}
-$("saveProject").onclick=()=>run(async()=>{saveProjectRecord();status("项目记录下载已请求；请确认文件已保存，并同时保留原图。");});
+async function saveProjectRecord(){
+ const bundle=await makePrivateBundle(pages,links);
+ download(bundle,"veilpng_PRIVATE_project.zip");savedRevision=revision;
+}
+$("saveProject").onclick=()=>run(async()=>{await saveProjectRecord();status("私人完整工程 ZIP 下载已请求；请确认保存成功。");});
 $("openProject").onclick=()=>$("projectFile").click();
 $("projectFile").onchange=()=>{const f=$("projectFile").files[0];$("projectFile").value="";if(!f)return;run(async()=>{
+ let staged,newLinks;
+ if(/\.zip$/i.test(f.name)){
+  const result=await unpackPrivateBundle(f,newPage);staged=result.pages;newLinks=result.links;
+ }else{
   if(f.size>64*1024*1024)throw Error("项目记录超限");
-  const r=JSON.parse(await f.text()),matched=matchProject(r,pages);
-  if(pages.some(marked)&&!confirm("替换当前全部选区并按项目记录排序？"))return;
-  links=[];pages=matched;await select(0);markDirty();status("项目记录已恢复，所有原图 SHA-256 均匹配。");
+  if(!pages.length)throw Error("旧 JSON 不含原图：请先导入全部原图，或打开新版私人工程 ZIP");
+  const r=JSON.parse(await f.text());staged=matchProject(r,pages);newLinks=restoreLinks(r,staged);
+ }
+ if(pages.length&&!confirm("替换当前工程？"))return;
+ links=newLinks;pages=staged;await select(0);markDirty();status("工程已恢复，原图哈希通过；已保存的中日配准关系已恢复，请检查后确认。");
 });};
 $("pageRole").onchange=()=>{if(current()){links=links.filter(l=>l.source!==current()&&l.target!==current());current().role=validRole($("pageRole").value);refreshPartner();controls();markDirty();}};
 function grayThumbnail(source){
@@ -299,13 +309,14 @@ $("copyMask").onclick=()=>run(async()=>{
  if(linkFor(links,p)||linkFor(links,q))throw Error("请先解除已有配对");
  const l=makeLink(p,q,alignment.matrix);
  if(p.ops.length&&!q.ops.length){q.ops=p.ops.map(op=>mappedOp(l,p,op));q.shade=p.shade;q.redo=[];invalidatePair(q);markDirty();}
- links.push(l);$("linkEdits").checked=true;clearAlignment();render();status("已绑定中日同页；框选后两侧同步遮盖，请检查两侧。");
+ links.push(l);markDirty();$("linkEdits").checked=true;clearAlignment();render();status("已绑定中日同页；框选后两侧同步遮盖，请检查两侧。");
 });
 $("quickImport").onclick=()=>{$("importRole").value="其他";ui.files.click();};
 $("importCN").onclick=()=>{$("importRole").value="中";ui.files.click();};
 $("importJP").onclick=()=>{$("importRole").value="日";ui.files.click();};
 $("easySave").onclick=()=>$("saveProject").click();
 $("easyResume").onclick=()=>$("resumeProject").click();
+$("easyOpen").onclick=()=>$("openProject").click();
 $("easyRecover").onclick=()=>$("recoverMasks").click();
 $("quickExport").onclick=()=>ui.exportAll.click();
 $("quickReturn").onclick=()=>$("returnFile").click();
@@ -331,13 +342,14 @@ $("recoverFiles").onchange=()=>{const input=Array.from($("recoverFiles").files);
  for(const [i,r] of staged){const p=pages[i];p.ops=r.ops;p.shade=r.shade;p.redo=[];invalidatePair(p);invalidateLinkReview(p);}
  markDirty();await select(staged.keys().next().value);status("已重建选区；请逐页检查，并保存全部项目记录。");
 });};
-$("batchReturnFile").onchange=()=>{const files=Array.from($("batchReturnFile").files);$("batchReturnFile").value="";if(!files.length)return;run(async()=>{
- if(files.length>32)throw Error("回传图最多 32 张");
+$("batchReturnFile").onchange=()=>{const input=Array.from($("batchReturnFile").files);$("batchReturnFile").value="";if(!input.length)return;run(async()=>{
+ const files=[];for(const f of input){if(/\.zip$/i.test(f.name))files.push(...await readPublicZip(f,"return"));else files.push(f);}
+ if(!files.length||files.length>32||files.reduce((n,f)=>n+f.size,0)>TOTAL)throw Error("回传图最多 32 张，合计 80 MB");
  const staged=new Map(),role=$("returnRole").value;
  for(const f of files){
    status("正在识别回传图 "+f.name);const b=await decode(f),hits=[];
    try{
-     for(let i=0;i<pages.length;i++){const p=pages[i];if(!marked(p)||(role&&p.role!==role))continue;
+     for(let i=0;i<pages.length;i++){const p=pages[i],hint=roleFromPublicName(f.name);if(!marked(p)||(role&&p.role!==role)||(hint&&p.role!==hint))continue;
        const src=await decode(p.file);try{let r;try{r=matchPublic(p,src,b);projectedMask(maskFor(p.width,p.height,p.ops),p.width,p.height,b.width,b.height,r.matrix);}catch{continue;}hits.push({i,...r});}finally{src.close();}
      }
      const hit=chooseMatch(hits);
@@ -357,7 +369,7 @@ function syncEasyControls(){
  $("nextAction").textContent=!pages.length?"第一步：导入原图":!n?"在图片上拖动矩形选区":k>reviewed?"检查返回图，再确认当前页":reviewed?"已确认的结果可以导出":"标记完成后，保存项目并导出遮盖图片";
  $("easyProgress").textContent="已导入 "+pages.length+" 张 · 有选区 "+n+" 张 · 已配对 "+k+" 张 · 已确认 "+reviewed+" 张";
  for(const id of ["importCN","importJP","easyResume"])$(id).disabled=busy;
- $("easySave").disabled=$("saveProject").disabled;$("easyRecover").disabled=$("recoverMasks").disabled;
+ $("easyOpen").disabled=busy;$("easySave").disabled=$("saveProject").disabled;$("easyRecover").disabled=$("recoverMasks").disabled;
  $("easyMatch").disabled=busy||!p||!!linkFor(links,p)||!pages.some(q=>opposite(p,q)&&!linkFor(links,q));
  $("easyTransfer").disabled=$("copyMask").disabled;
  $("nextReview").disabled=busy||!restoredBlob||!pairIsCurrent(p);
@@ -413,5 +425,5 @@ async function refreshPartner(){
 }
 $("switchSide").onclick=()=>run(async()=>{const l=linkFor(links,current());if(l)await select(pages.indexOf(other(l,current())));});
 $("confirmBoth").onclick=()=>{const l=linkFor(links,current());if(!l||$("partnerCanvas").dataset.ready!=="yes"||!hasMask(l.source)||!hasMask(l.target))return;if(confirm("确认两侧遮盖范围完整且正确？")){l.reviewed=true;controls();status("中日两侧均已确认，可一起导出。");}};
-$("unlinkBoth").onclick=()=>{const l=linkFor(links,current());if(l&&confirm("解除配对但保留两侧现有选区？")){links=links.filter(x=>x!==l);refreshPartner();fitCanvas();controls();}};
+$("unlinkBoth").onclick=()=>{const l=linkFor(links,current());if(l&&confirm("解除配对但保留两侧现有选区？")){links=links.filter(x=>x!==l);markDirty();refreshPartner();fitCanvas();controls();}};
 controls();
