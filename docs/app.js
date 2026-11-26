@@ -34,8 +34,10 @@ function draw(b,p,c){
   const mask=maskFor(c.width,c.height,p.ops),im=x.getImageData(0,0,c.width,c.height);
   const n=redactRGBA(im.data,mask,p.shade);x.putImageData(im,0,0);return n;
 }
+function fitCanvas(){if(!bitmap)return;const w=Math.max(1,ui.stack.parentElement.clientWidth-24),h=Math.max(1,Math.floor(window.innerHeight*(window.innerWidth<=720?0.56:0.64)));const scale=Math.min(1,w/bitmap.width,h/bitmap.height);ui.stack.style.width=Math.max(1,Math.floor(bitmap.width*scale))+"px";ui.stack.style.height=Math.max(1,Math.floor(bitmap.height*scale))+"px";}
+window.addEventListener("resize",fitCanvas);
 function render(){const p=current();if(!p||!bitmap)return;count=draw(bitmap,p,ui.preview);ui.gesture.width=bitmap.width;ui.gesture.height=bitmap.height;ui.gesture.getContext("2d").clearRect(0,0,bitmap.width,bitmap.height);
-  ui.shade.value=String(p.shade);ui.stack.hidden=false;ui.empty.hidden=true;status((index+1)+"/"+pages.length+" · "+bitmap.width+" × "+bitmap.height+" · 已遮盖 "+count+" 像素");controls();}
+  ui.shade.value=String(p.shade);ui.stack.hidden=false;ui.empty.hidden=true;fitCanvas();status((index+1)+"/"+pages.length+" · "+bitmap.width+" × "+bitmap.height+" · 已遮盖 "+count+" 像素");controls();}
 async function select(i){const b=await decode(pages[i].file);if(bitmap)bitmap.close();bitmap=b;index=i;render();}
 ui.files.onchange=()=>{const incoming=Array.from(ui.files.files);ui.files.value="";run(async()=>{if(!incoming.length)return;if(pages.length+incoming.length>32||pages.reduce((s,p)=>s+p.file.size,0)+incoming.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error("队列超过容量限制");for(const f of incoming){if(f.size>MAX)throw Error("单文件超过 20 MB");}const staged=[];for(const f of incoming){const b=await decode(f);b.close();staged.push({file:f,ops:[],redo:[],shade:0});}const old=pages.length;pages.push(...staged);if(index<0)await select(old);else render();});};
 function point(e){const r=ui.gesture.getBoundingClientRect();return [Math.max(0,Math.min(ui.gesture.width-1,Math.floor((e.clientX-r.left)*ui.gesture.width/r.width))),Math.max(0,Math.min(ui.gesture.height-1,Math.floor((e.clientY-r.top)*ui.gesture.height/r.height)))];}
