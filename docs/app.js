@@ -1,8 +1,10 @@
 import {maskFor,redactRGBA,zipStore} from "./core.mjs";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
 let pages=[],index=-1,bitmap=null,busy=false,drag=null,count=0;
+let restoredBlob=null,restoredURL=null;
 const current=()=>pages[index];
 const marked=p=>p&&p.ops.length>0;
 function status(t){ui.status.textContent=t;}
@@ -10,6 +12,7 @@ function controls(){
   const p=current();for(const x of [ui.files,ui.clearAll,ui.tool,ui.radius,ui.shade])x.disabled=busy;
   ui.undo.disabled=busy||!p||!p.ops.length;ui.redo.disabled=busy||!p||!p.redo.length;ui.clearMask.disabled=busy||!p||!p.ops.length;
   ui.exportOne.disabled=busy||!p||count===0;ui.exportAll.disabled=busy||!pages.some(marked);
+  syncReturnControls();
   ui.queue.replaceChildren();
   pages.forEach((q,i)=>{const li=document.createElement("li"),b=document.createElement("button");b.type="button";b.textContent=(marked(q)?"● ":"○ ")+q.file.name;b.disabled=busy;b.setAttribute("aria-current",String(i===index));b.onclick=()=>run(()=>select(i));li.append(b);ui.queue.append(li);});
 }
@@ -36,7 +39,7 @@ function draw(b,p,c){
 }
 function fitCanvas(){if(!bitmap)return;const w=Math.max(1,ui.stack.parentElement.clientWidth-24),h=Math.max(1,Math.floor(window.innerHeight*(window.innerWidth<=720?0.56:0.64)));const scale=Math.min(1,w/bitmap.width,h/bitmap.height);ui.stack.style.width=Math.max(1,Math.floor(bitmap.width*scale))+"px";ui.stack.style.height=Math.max(1,Math.floor(bitmap.height*scale))+"px";}
 window.addEventListener("resize",fitCanvas);
-function render(){const p=current();if(!p||!bitmap)return;count=draw(bitmap,p,ui.preview);ui.gesture.width=bitmap.width;ui.gesture.height=bitmap.height;ui.gesture.getContext("2d").clearRect(0,0,bitmap.width,bitmap.height);
+function render(){clearRestored();const p=current();if(!p||!bitmap)return;count=draw(bitmap,p,ui.preview);ui.gesture.width=bitmap.width;ui.gesture.height=bitmap.height;ui.gesture.getContext("2d").clearRect(0,0,bitmap.width,bitmap.height);
   ui.shade.value=String(p.shade);ui.stack.hidden=false;ui.empty.hidden=true;fitCanvas();status((index+1)+"/"+pages.length+" · "+bitmap.width+" × "+bitmap.height+" · 已遮盖 "+count+" 像素");controls();}
 async function select(i){const b=await decode(pages[i].file);if(bitmap)bitmap.close();bitmap=b;index=i;render();}
 ui.files.onchange=()=>{const incoming=Array.from(ui.files.files);ui.files.value="";run(async()=>{if(!incoming.length)return;if(pages.length+incoming.length>32||pages.reduce((s,p)=>s+p.file.size,0)+incoming.reduce((s,f)=>s+f.size,0)>TOTAL)throw Error("队列超过容量限制");for(const f of incoming){if(f.size>MAX)throw Error("单文件超过 20 MB");}const staged=[];for(const f of incoming){const b=await decode(f);b.close();staged.push({file:f,ops:[],redo:[],shade:0});}const old=pages.length;pages.push(...staged);if(index<0)await select(old);else render();});};
@@ -50,11 +53,59 @@ ui.undo.onclick=()=>{if(current()?.ops.length){current().redo.push(current().ops
 ui.redo.onclick=()=>{if(current()?.redo.length){current().ops.push(current().redo.pop());render();}};
 ui.clearMask.onclick=()=>{if(current()&&confirm("清空本页选区？")){current().ops=[];current().redo=[];render();}};
 ui.shade.onchange=()=>{if(current()){current().shade=Number(ui.shade.value);render();}};
-ui.clearAll.onclick=()=>{if(!pages.length||confirm("清空全部图片和选区？")){if(bitmap)bitmap.close();bitmap=null;pages=[];index=-1;count=0;drag=null;ui.stack.hidden=true;ui.empty.hidden=false;for(const c of [ui.preview,ui.gesture]){c.width=1;c.height=1;}status("尚未导入图片");controls();}};
+ui.clearAll.onclick=()=>{if(!pages.length||confirm("清空全部图片和选区？")){if(bitmap)bitmap.close();bitmap=null;clearRestored();pages=[];index=-1;count=0;drag=null;ui.stack.hidden=true;ui.empty.hidden=false;for(const c of [ui.preview,ui.gesture]){c.width=1;c.height=1;}status("尚未导入图片");controls();}};
 function png(c){return new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(Error("PNG 编码失败")),"image/png"));}
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 const name=i=>String(i+1).padStart(4,"0")+"_redacted.png";
 async function exportPage(p){const b=await decode(p.file),c=document.createElement("canvas");try{if(!draw(b,p,c))return null;return await png(c);}finally{b.close();c.width=1;c.height=1;}}
 ui.exportOne.onclick=()=>run(async()=>{const b=await exportPage(current());if(!b)throw Error("选区为空");download(b,name(index));status("当前 PNG 已生成");});
 ui.exportAll.onclick=()=>run(async()=>{const entries=[];let size=0;for(let i=0;i<pages.length;i++){if(!marked(pages[i]))continue;status("正在编码 "+(i+1)+"/"+pages.length);const b=await exportPage(pages[i]);if(!b)continue;size+=b.size;if(size>128*1024*1024)throw Error("导出超过 128 MB，请分批处理");entries.push({name:name(i),data:new Uint8Array(await b.arrayBuffer())});}if(!entries.length)throw Error("没有有效遮盖选区");download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_redacted.zip");status("已生成 "+entries.length+" 张遮盖 PNG 的 ZIP");});
+
+function syncReturnControls(){
+  $("saveRecord").disabled=busy||!current()||count===0;
+  $("loadRecord").disabled=busy||!current();
+  $("loadReturn").disabled=busy||!current()||count===0;
+  $("exportRestored").disabled=busy||!restoredBlob;
+}
+function clearRestored(){
+  restoredBlob=null;
+  if(restoredURL)URL.revokeObjectURL(restoredURL);
+  restoredURL=null;$("restoredImage").removeAttribute("src");$("returnPreview").hidden=true;
+}
+$("saveRecord").onclick=()=>run(async()=>{
+  const p=current();if(!p||!bitmap||!count)throw Error("没有有效遮盖选区");
+  const r=maskRecord(bitmap.width,bitmap.height,await sourceHash(p.file),p.ops,p.shade);
+  download(new Blob([JSON.stringify(r)],{type:"application/json"}),String(index+1).padStart(4,"0")+"_local_mask.json");
+  status("遮盖记录已生成：仅本地保存，不要与公开预览一同上传。");
+});
+$("loadRecord").onclick=()=>$("recordFile").click();
+$("recordFile").onchange=()=>{const f=$("recordFile").files[0];$("recordFile").value="";if(!f)return;run(async()=>{
+  if(f.size>6000000)throw Error("遮盖记录超限");
+  const p=current();if(!p||!bitmap)throw Error("请先导入原图");
+  const r=loadMaskRecord(await f.text(),bitmap.width,bitmap.height,await sourceHash(p.file));
+  if(p.ops.length&&!confirm("替换当前页遮盖记录？"))return;
+  p.ops=r.ops;p.shade=r.shade;p.redo=[];render();status("遮盖记录已恢复，原图 SHA-256 匹配。");
+});};
+$("loadReturn").onclick=()=>$("returnFile").click();
+$("returnFile").onchange=()=>{const f=$("returnFile").files[0];$("returnFile").value="";if(!f)return;run(async()=>{
+  clearRestored();
+  const p=current();if(!p||!bitmap||!count)throw Error("请先准备原图及有效遮盖记录");
+  const b=await decode(f),c=document.createElement("canvas");
+  try{
+    if(b.width!==bitmap.width||b.height!==bitmap.height)throw Error("回传图尺寸不一致，请先在本地配准");
+    c.width=b.width;c.height=b.height;const x=c.getContext("2d",{alpha:false,willReadFrequently:true});
+    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(bitmap,0,0);
+    const original=x.getImageData(0,0,c.width,c.height);
+    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(b,0,0);
+    const returned=x.getImageData(0,0,c.width,c.height),mask=maskFor(c.width,c.height,p.ops);
+    const n=restoreRGBA(original.data,returned.data,mask);x.putImageData(returned,0,0);
+    restoredBlob=await png(c);restoredURL=URL.createObjectURL(restoredBlob);
+    $("restoredImage").src=restoredURL;$("returnPreview").hidden=false;
+    status("恢复 "+n+" 像素，非选区保留回传图，请检查预览后导出。");
+  }finally{b.close();c.width=1;c.height=1;}
+});};
+$("exportRestored").onclick=()=>run(async()=>{
+  if(!restoredBlob)throw Error("没有恢复结果");
+  download(restoredBlob,String(index+1).padStart(4,"0")+"_restored.png");status("恢复 PNG 已生成");
+});
 controls();
