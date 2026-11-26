@@ -1,16 +1,18 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.2";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.2";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.2";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.2";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.2";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.2";
-import {readPublicZip} from "./zip-read.mjs?v=0.9.2";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.2";
-import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.2";
-import {webpDimensions} from "./webp.mjs?v=0.9.2";
-import {rectanglePlan} from "./local-rect.mjs?v=0.9.2";
-import {matchPatchTone} from "./tone.mjs?v=0.9.2";
-import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.2";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.3";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.3";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.3";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.3";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.3";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.3";
+import {readPublicZip} from "./zip-read.mjs?v=0.9.3";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.3";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.3";
+import {webpDimensions} from "./webp.mjs?v=0.9.3";
+import {rectanglePlan} from "./local-rect.mjs?v=0.9.3";
+import {matchPatchTone} from "./tone.mjs?v=0.9.3";
+import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.3";
+import {cleanMaskFringe} from "./fringe.mjs?v=0.9.3";
+import {preferPairedReference} from "./paired-reference.mjs?v=0.9.3";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -92,6 +94,7 @@ function syncReturnControls(){
   $("approvePair").checked=pairIsApproved(current());
   $("removePair").disabled=busy||!pairIsCurrent(current());
   $("compareZoom").disabled=busy||!pairIsCurrent(current());
+  $("pairedReference").disabled=busy;$("fringeCleanup").disabled=busy;
   $("restoreCurrent").disabled=busy||!pairIsCurrent(current());
   $("restoreAll").disabled=busy||!pages.some(pairIsCurrent);
   $("pairSummary").textContent="已导入 "+pages.filter(pairIsCurrent).length+" 页 · 已恢复 "+pages.filter(p=>pairIsCurrent(p)&&p.pair.composed).length+" 页 · 已确认 "+reviewed+" 页（仅导出已确认页面）";
@@ -130,7 +133,7 @@ function matchPublic(p,source,b){
    return registerImages(c,b);
  }finally{c.width=c.height=1;}
 }
-async function composePair(p,source,returnedFile){
+async function composeUsingSource(p,source,returnedFile){
  const b=await decode(returnedFile),c=document.createElement("canvas");
  try{
    const r=matchPublic(p,source,b),m=r.matrix;
@@ -152,12 +155,14 @@ async function composePair(p,source,returnedFile){
            const sourcePixels=px.getImageData(0,0,patch.width,patch.height),ref=ctx.getImageData(dst[0]-pad,dst[1]-pad,patch.width,patch.height);
            const geo=alignPatchContext(sourcePixels.data,ref.data,patch.width,patch.height,pad);
            const tone=matchPatchTone(geo.data,ref.data,patch.width,patch.height,pad);
-           sourcePixels.data.set(tone.data);ctx.putImageData(sourcePixels,dst[0]-pad,dst[1]-pad,pad,pad,dw,dh);
-           tones.push({applied:tone.applied,geometry:geo.applied,before:tone.before,after:tone.after,warning:tone.after===null||tone.after>18});
+           sourcePixels.data.set(tone.data);let fringeCount=0;
+           if($("fringeCleanup").checked){const fringe=cleanMaskFringe(sourcePixels.data,ref.data,patch.width,patch.height,pad,p.shade);ref.data.set(fringe.data);ctx.putImageData(ref,dst[0]-pad,dst[1]-pad,pad-2,pad-2,dw+4,dh+4);fringeCount=fringe.changed;}
+           ctx.putImageData(sourcePixels,dst[0]-pad,dst[1]-pad,pad,pad,dw,dh);
+           tones.push({applied:tone.applied,geometry:geo.applied,before:tone.before,after:tone.after,contextCorrelation:geo.after,fringe:fringeCount,warning:tone.after===null||tone.after>18});
          }finally{patch.width=patch.height=1;}
        }n+=dw*dh;
      }}finally{original.width=original.height=1;}
-     return {blob:await png(c),n,width:b.width,median:r.pixelMedian,localRects:rects.length,tones};
+     return {blob:await png(c),n,width:b.width,median:r.pixelMedian,localRects:rects.length,rects,tones};
    }
    if(p.ops.every(o=>o.kind==="rect"))throw Error("未能可靠确认返回图矩形边界，请检查返回图与原选区；不会盲目扩大恢复范围");
    const mask=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
@@ -169,6 +174,28 @@ async function composePair(p,source,returnedFile){
    x.putImageData(returned,0,0);return {blob:await png(c),n,width:b.width,median:r.pixelMedian};
  }finally{b.close();c.width=c.height=1;}
 }
+async function composePair(p,source,returnedFile){
+ const primary=await composeUsingSource(p,source,returnedFile);
+ primary.sourceLabel="对应原图";
+ if(!$("pairedReference").checked||p.role!=="中"||!primary.rects)return primary;
+ const l=linkFor(links,p),q=l&&other(l,p);
+ if(!q||q.role!=="日"||q.shade!==p.shade||!q.ops.length){primary.referenceNote="没有可用的同页日文母版";return primary;}
+ let b=null;
+ try{
+  b=await decode(q.file);
+  const alternate=await composeUsingSource(q,b,returnedFile);
+  if(preferPairedReference(primary,alternate)){alternate.sourceLabel="配对日文母版（须核对内容）";return alternate;}
+  primary.referenceNote="母版未达到改善阈值，使用对应原图";
+ }catch(e){primary.referenceNote="母版未通过校验，使用对应原图";}
+ finally{if(b)b.close();}
+ return primary;
+}
+for(const id of ["pairedReference","fringeCleanup"])$(id).onchange=()=>run(async()=>{
+ if(id==="pairedReference"&&$(id).checked&&!confirm("仅适合中日画面一致且遮盖区无版本专属文字的页面。允许在已配对的日文母版显著改善边界时使用其像素？")){$(id).checked=false;return;}
+ for(const p of pages)if(pairIsCurrent(p)){p.pair.composed=false;setPairApproval(p,false);}
+ clearRestored();if(pairIsCurrent(current()))await showPair(current());
+ status("恢复选项已修改，请重新恢复并检查。");
+});
 function applyCompareZoom(){
   const z=$("compareZoom").value;
   for(const id of ["returnedImage","restoredImage"]){
@@ -181,7 +208,7 @@ function presentPair(p,result){
   restoredURL=URL.createObjectURL(restoredBlob);returnedURL=URL.createObjectURL(result.alignedBlob||p.pair.file);
   $("restoredImage").src=restoredURL;$("restoredImage").hidden=false;$("restoreWaiting").hidden=true;$("returnedImage").src=returnedURL;
   $("returnPreview").hidden=false;applyCompareZoom();
-  status("恢复 "+result.n+" 像素 · "+(result.localRects?"局部矩形 "+result.localRects+" 处":"全局映射（请仔细核对）")+(result.tones?" · 色调校正 "+result.tones.filter(t=>t.applied).length+" 处 · 位移校正 "+result.tones.filter(t=>t.geometry).length+" 处"+(result.tones.some(t=>t.warning)?" · 注意：部分接缝仍不可靠，须人工检查":""):"")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
+  status("恢复 "+result.n+" 像素 · "+(result.sourceLabel||"对应原图")+(result.referenceNote?" · "+result.referenceNote:"")+(result.tones?" · 窄边清理 "+result.tones.reduce((n,t)=>n+(t.fringe||0),0)+" 像素":"")+" · "+(result.localRects?"局部矩形 "+result.localRects+" 处":"全局映射（请仔细核对）")+(result.tones?" · 色调校正 "+result.tones.filter(t=>t.applied).length+" 处 · 位移校正 "+result.tones.filter(t=>t.geometry).length+" 处"+(result.tones.some(t=>t.warning)?" · 注意：部分接缝仍不可靠，须人工检查":""):"")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
 }
 async function showPair(p){if(!pairIsCurrent(p))return;if(p.pair.composed){presentPair(p,await composePair(p,bitmap,p.pair.file));}else{clearRestored();const b=await decode(p.pair.file);try{compareWidth=b.width;}finally{b.close();}returnedURL=URL.createObjectURL(p.pair.file);$("returnedImage").src=returnedURL;$("returnPreview").hidden=false;applyCompareZoom();status("返回图已导入："+p.pair.file.name+"。点击恢复遮盖区域。");}}
 $("restoreCurrent").onclick=()=>run(async()=>{const p=current();if(!pairIsCurrent(p))throw Error("先导入对应返回图");const result=await composePair(p,bitmap,p.pair.file);p.pair.composed=true;setPairApproval(p,false);presentPair(p,result);$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});});

@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {cleanMaskFringe} from './fringe.mjs';
+import {preferPairedReference} from './paired-reference.mjs';
+const w=16,h=16,pad=4,a=new Uint8ClampedArray(w*h*4).fill(255),b=a.slice(),k=(x,y)=>(y*w+x)*4;
+for(const [x,y] of [[3,6],[2,6],[1,6],[5,6]])b.set([10,10,10,255],k(x,y));
+const r=cleanMaskFringe(a,b,w,h,pad,0);
+assert.equal(r.changed,2);assert.equal(r.data[k(3,6)],255);assert.equal(r.data[k(2,6)],218);assert.equal(r.data[k(1,6)],10);assert.equal(r.data[k(5,6)],10);
+const p={rects:[{dst:[1,2,3,4]},{dst:[5,6,7,8]}],tones:[{after:4},{after:48}]};
+const q={rects:p.rects,tones:[{after:1,contextCorrelation:.95},{after:1.4,contextCorrelation:.96}]};
+assert.equal(preferPairedReference(p,q),true);
+assert.equal(preferPairedReference(p,{...q,rects:[{dst:[1,2,3,5]},q.rects[1]]}),false);
+assert.equal(preferPairedReference(p,{...q,tones:[{after:1,contextCorrelation:.4},q.tones[1]]}),false);
+assert.equal(preferPairedReference(p,{...q,tones:[{after:5,contextCorrelation:.95},q.tones[1]]}),false);
+assert.equal(preferPairedReference(p,{...q,tones:[{after:null,contextCorrelation:.95},q.tones[1]]}),false);
+console.log('10 fringe and paired-reference checks passed');
