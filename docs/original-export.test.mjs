@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {sourceHash} from './return-core.mjs';
+import {verifiedOriginal} from './original-export.mjs';
+const file=new File([Uint8Array.of(137,80,78,71,1,2,3)],'原文件.png',{type:'image/png'});
+const hash=await sourceHash(file);
+const page={file,hash,ops:[],pair:{file:new File(['different'],'returned.png')}};
+const r=await verifiedOriginal(page);
+assert.equal(r.file,file);
+assert.equal(r.name,'原文件.png');
+assert.equal(r.hash,hash);
+assert.deepEqual(new Uint8Array(await r.file.arrayBuffer()),new Uint8Array(await file.arrayBuffer()));
+await assert.rejects(()=>verifiedOriginal({...page,hash:'0'.repeat(64)}));
+await assert.rejects(()=>verifiedOriginal({...page,hash:undefined}));
+await assert.rejects(()=>verifiedOriginal(null));
+const bad=new File([file],'../bad.png');
+await assert.rejects(()=>verifiedOriginal({file:bad,hash}));
+console.log('8 archival export checks passed');

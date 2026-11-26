@@ -61,3 +61,6 @@ Two opt-in, session-local recovery options: paired Japanese reference (only for 
 
 ## Web 0.9.4
 Optional general-purpose thin join cleanup now runs on a single composited patch buffer. It detects narrow, continuous color overshoots between similar adjacent pixels and leaves strong transitions alone; it does not feather the interior against the uncomposited input. The optional edit remains bounded to a two-pixel outer neighborhood. The detector is intentionally conservative and can miss seams or mistake thin genuine lines for artifacts. Check the result manually. Synthetic RGB and grayscale regression tests use known ground truth; no user images are included. Run node docs/join-lines.test.mjs.
+
+## Web 0.9.5 — standalone original-file archival export
+The new “Download original (lossless)” action verifies the stored SHA-256 against the original file and downloads its unchanged bytes under the original filename. It operates solely on the private original file, not on the mask or any externally edited image. This does not change the compositing path, nor is it a seamless-compositing guarantee. The desktop application's existing original-file export remains unchanged. Run node docs/original-export.test.mjs for the archival module tests.

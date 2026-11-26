@@ -1,19 +1,20 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.4";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.4";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.4";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.4";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.4";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.4";
-import {readPublicZip} from "./zip-read.mjs?v=0.9.4";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.4";
-import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.4";
-import {webpDimensions} from "./webp.mjs?v=0.9.4";
-import {rectanglePlan} from "./local-rect.mjs?v=0.9.4";
-import {matchPatchTone} from "./tone.mjs?v=0.9.4";
-import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.4";
-import {cleanMaskFringe} from "./fringe.mjs?v=0.9.4";
-import {preferPairedReference} from "./paired-reference.mjs?v=0.9.4";
-import {repairJoinLines} from "./join-lines.mjs?v=0.9.4";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.5";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.5";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.5";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.5";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.5";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.5";
+import {readPublicZip} from "./zip-read.mjs?v=0.9.5";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.5";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.5";
+import {webpDimensions} from "./webp.mjs?v=0.9.5";
+import {rectanglePlan} from "./local-rect.mjs?v=0.9.5";
+import {matchPatchTone} from "./tone.mjs?v=0.9.5";
+import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.5";
+import {cleanMaskFringe} from "./fringe.mjs?v=0.9.5";
+import {preferPairedReference} from "./paired-reference.mjs?v=0.9.5";
+import {repairJoinLines} from "./join-lines.mjs?v=0.9.5";
+import {verifiedOriginal} from "./original-export.mjs?v=0.9.5";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -275,6 +276,7 @@ function syncProjectControls(){
   $("pageRole").disabled=busy||!p;$("copyTarget").disabled=busy||!p||pages.length<2;
   $("registerPair").disabled=busy||!p||!target.value;
   $("copyMask").disabled=busy||!p||!validAlignment()||!opposite(p,alignment?.target);
+  $("downloadOriginal").disabled=busy||!p;
   $("saveProject").disabled=busy||!pages.length;$("openProject").disabled=busy;
   $("quickExport").disabled=ui.exportAll.disabled;$("quickReturn").disabled=$("loadReturn").disabled;
   $("quickBatchReturn").disabled=busy||!pages.some(marked);$("returnRole").disabled=busy;$("recoverMasks").disabled=busy||!pages.length;$("quickRestore").disabled=$("exportBatch").disabled;
@@ -316,6 +318,12 @@ async function saveProjectRecord(){
 }
 $("saveProject").onclick=()=>run(async()=>{await saveProjectRecord();status("私人完整工程 ZIP 下载已请求；请确认保存成功。");});
 $("openProject").onclick=()=>$("projectFile").click();
+$("downloadOriginal").onclick=()=>run(async()=>{
+  const p=current();if(!p)throw Error("请先打开私人项目或原文件");
+  if(!confirm("仅下载私人原文件的原始字节，不包含任何外部编辑。请在私人设备保存，继续？"))return;
+  const r=await verifiedOriginal(p);
+  download(r.file,r.name);status("原文件 SHA-256 已校验，已请求无损下载。请确认浏览器保存成功。");
+});
 $("projectFile").onchange=()=>{const f=$("projectFile").files[0];$("projectFile").value="";if(!f)return;run(async()=>{
  let staged,newLinks;
  if(/\.zip$/i.test(f.name)){
