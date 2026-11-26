@@ -1,13 +1,14 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.0";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.0";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.0";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.0";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.0";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.0";
-import {readPublicZip} from "./zip-read.mjs?v=0.9.0";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.0";
-import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.0";
-import {webpDimensions} from "./webp.mjs?v=0.9.0";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.1";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.1";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.1";
+import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.1";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.1";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.1";
+import {readPublicZip} from "./zip-read.mjs?v=0.9.1";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.1";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.1";
+import {webpDimensions} from "./webp.mjs?v=0.9.1";
+import {rectanglePlan} from "./local-rect.mjs?v=0.9.1";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -131,6 +132,15 @@ async function composePair(p,source,returnedFile){
  const b=await decode(returnedFile),c=document.createElement("canvas");
  try{
    const r=matchPublic(p,source,b),m=r.matrix;
+   const rects=rectanglePlan(p.ops,p.shade,source.width,source.height,rgbaOf(b).data,b.width,b.height,m);
+   if(rects){
+     c.width=b.width;c.height=b.height;const ctx=c.getContext("2d",{alpha:false,willReadFrequently:true});
+     ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(b,0,0);
+     const original=document.createElement("canvas");original.width=source.width;original.height=source.height;const ox=original.getContext("2d",{alpha:false});ox.fillStyle="#fff";ox.fillRect(0,0,original.width,original.height);ox.drawImage(source,0,0);
+     let n=0;try{for(const {src,dst} of rects){const sw=src[2]-src[0]+1,sh=src[3]-src[1]+1,dw=dst[2]-dst[0]+1,dh=dst[3]-dst[1]+1;ctx.drawImage(original,src[0],src[1],sw,sh,dst[0],dst[1],dw,dh);n+=dw*dh;}}finally{original.width=original.height=1;}
+     return {blob:await png(c),n,width:b.width,median:r.pixelMedian,localRects:rects.length};
+   }
+   if(p.ops.every(o=>o.kind==="rect"))throw Error("未能可靠确认返回图矩形边界，请检查返回图与原选区；不会盲目扩大恢复范围");
    const mask=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
    c.width=b.width;c.height=b.height;const x=c.getContext("2d",{alpha:false,willReadFrequently:true});
    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.setTransform(m[0],m[1],-m[1],m[0],m[2],m[3]);x.drawImage(source,0,0);x.setTransform(1,0,0,1,0,0);
@@ -152,7 +162,7 @@ function presentPair(p,result){
   restoredURL=URL.createObjectURL(restoredBlob);returnedURL=URL.createObjectURL(result.alignedBlob||p.pair.file);
   $("restoredImage").src=restoredURL;$("restoredImage").hidden=false;$("restoreWaiting").hidden=true;$("returnedImage").src=returnedURL;
   $("returnPreview").hidden=false;applyCompareZoom();
-  status("恢复 "+result.n+" 像素 · 配准误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
+  status("恢复 "+result.n+" 像素 · "+(result.localRects?"局部矩形 "+result.localRects+" 处":"全局映射（请仔细核对）")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
 }
 async function showPair(p){if(!pairIsCurrent(p))return;if(p.pair.composed){presentPair(p,await composePair(p,bitmap,p.pair.file));}else{clearRestored();const b=await decode(p.pair.file);try{compareWidth=b.width;}finally{b.close();}returnedURL=URL.createObjectURL(p.pair.file);$("returnedImage").src=returnedURL;$("returnPreview").hidden=false;applyCompareZoom();status("返回图已导入："+p.pair.file.name+"。点击恢复遮盖区域。");}}
 $("restoreCurrent").onclick=()=>run(async()=>{const p=current();if(!pairIsCurrent(p))throw Error("先导入对应返回图");const result=await composePair(p,bitmap,p.pair.file);p.pair.composed=true;setPairApproval(p,false);presentPair(p,result);$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});});
@@ -359,7 +369,8 @@ $("batchReturnFile").onchange=()=>{const input=Array.from($("batchReturnFile").f
      for(let i=0;i<pages.length;i++){const p=pages[i],hint=roleFromPublicName(f.name);if(!marked(p)||(role&&p.role!==role)||(hint&&p.role!==hint))continue;
        const src=await decode(p.file);try{let r;try{r=matchPublic(p,src,b);projectedMask(maskFor(p.width,p.height,p.ops),p.width,p.height,b.width,b.height,r.matrix);}catch{continue;}hits.push({i,...r});}finally{src.close();}
      }
-     const hit=chooseMatch(hits);
+     let hit;const candidates=hits.filter(r=>r.inliers>=20&&r.inliers/r.matches>=.35).sort((a,b)=>b.inliers-a.inliers);
+     try{hit=chooseMatch(hits);}catch(e){if(candidates.length<2)throw e;const answer=prompt("返回图来源不唯一，请选择正确原图（输入编号，取消则终止导入）：\n"+f.name+"\n"+candidates.map((r,k)=>(k+1)+" · ["+pages[r.i].role+"] "+pages[r.i].file.name+" · 内点 "+r.inliers+" · 误差 "+r.pixelMedian.toFixed(2)+" px").join("\n"));if(answer===null)return;if(!/^[0-9]+$/.test(answer.trim())||!candidates[Number(answer)-1])throw Error("未选择有效来源");hit=candidates[Number(answer)-1];}
      if(staged.has(hit.i))throw Error("多个返回图匹配到同一原图："+f.name);
      staged.set(hit.i,f);
    }finally{b.close();}
