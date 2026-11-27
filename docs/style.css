@@ -16,3 +16,5 @@
 .dual-stage{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}.dual-stage:has(.dual-partner[hidden]){grid-template-columns:1fr}.dual-partner{min-width:0;overflow:auto}.dual-partner>div{min-width:0;width:100%;text-align:center}.dual-partner canvas{width:auto;max-width:100%;height:auto;max-height:64vh;margin:auto}.dual-partner p{font-size:13px;color:#274e75;overflow-wrap:anywhere}#dualTools[hidden],.dual-partner[hidden]{display:none!important}#dualTools{background:#edf3fb;padding:8px;border-radius:7px}#dualTools strong{font-size:13px}@media(max-width:720px){.dual-stage{grid-template-columns:1fr}}
 
 #actionStatus{color:#1d4f83;overflow-wrap:anywhere}#restoredImage[hidden],#restoreWaiting[hidden]{display:none!important}#restoreWaiting{padding:18px;text-align:center}#restoreAll:not(:disabled),#restoreCurrent:not(:disabled){background:#205db4;color:white}
+
+.edge-controls{margin-top:5px;gap:6px 12px}.edge-controls input[type=number]{width:64px;padding:5px 7px}.edge-controls select{padding:5px 7px;font-size:13px}.edge-controls output{font-size:12px;color:#526981;font-variant-numeric:tabular-nums}.return-panel input[type=checkbox]{width:auto}

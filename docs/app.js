@@ -1,22 +1,22 @@
-import {snapshotFile,snapshotInputs,readableError} from "./local-file.mjs?v=0.9.6-filefix1";
-import {exportFilename} from "./naming.mjs?v=0.9.6-export1";
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.6-export1";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.6-export1";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages} from "./pairing.mjs?v=0.9.6-export1";
-import {projectRecord,matchProject,validRole,checkpoint} from "./project.mjs?v=0.9.6-export1";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.6-export1";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.6-edgefix1";
-import {readPublicZip} from "./zip-read.mjs?v=0.9.6-export1";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.6-export1";
-import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.6-export1";
-import {webpDimensions} from "./webp.mjs?v=0.9.6-export1";
-import {rectanglePlan} from "./local-rect.mjs?v=0.9.6-export1";
-import {matchPatchTone} from "./tone.mjs?v=0.9.6-export1";
-import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.6-export1";
-import {restoreBoundary,preserveOutsideMask} from "./return-boundary.mjs?v=0.9.6-protect1";
-import {preferPairedReference} from "./paired-reference.mjs?v=0.9.6-export1";
+import {snapshotFile,snapshotInputs,readableError} from "./local-file.mjs?v=1.0";
+import {exportFilename} from "./naming.mjs?v=1.0";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=1.0";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=1.0";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages} from "./pairing.mjs?v=1.0";
+import {projectRecord,matchProject,validRole,checkpoint} from "./project.mjs?v=1.0";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=1.0";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=1.0";
+import {readPublicZip} from "./zip-read.mjs?v=1.0";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=1.0";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=1.0";
+import {webpDimensions} from "./webp.mjs?v=1.0";
+import {rectanglePlan} from "./local-rect.mjs?v=1.0";
+import {matchPatchTone} from "./tone.mjs?v=1.0";
+import {alignPatchContext} from "./patch-geometry.mjs?v=1.0";
+import {restoreBoundary,preserveOutsideMask,boundaryOptions,boundedWriteMask} from "./return-boundary.mjs?v=1.0";
+import {preferPairedReference} from "./paired-reference.mjs?v=1.0";
 
-import {verifiedOriginal} from "./original-export.mjs?v=0.9.6-export1";
+import {verifiedOriginal} from "./original-export.mjs?v=1.0";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -87,6 +87,12 @@ ui.exportAll.onclick=()=>run(async()=>{
  download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_CN_JP_redacted.zip");status("已生成一个公开 ZIP，包含 "+entries.length+" 张遮盖 PNG；私人完整工程单独保存。");
 });
 
+function selectedBoundary(pad=Infinity){return boundaryOptions($("fringeCleanup").checked,$("edgeHalo").value,$("edgeFeather").value,pad);}
+function syncBoundaryControls(){
+ const opts=selectedBoundary();
+ for(const id of ["edgeHalo","edgeFeather","edgePreset"])$(id).disabled=busy||opts.exact;
+ $("edgeBudget").textContent=opts.exact?"严格保护 · 0 px":"选区外上限 "+(opts.maxHalo+opts.feather)+" px";
+}
 function syncReturnControls(){
   $("saveRecord").disabled=busy||!current()||count===0;
   $("loadRecord").disabled=busy||!current();
@@ -98,7 +104,7 @@ function syncReturnControls(){
   $("approvePair").checked=pairIsApproved(current());
   $("removePair").disabled=busy||!pairIsCurrent(current());
   $("compareZoom").disabled=busy||!pairIsCurrent(current());
-  $("pairedReference").disabled=busy;$("fringeCleanup").disabled=busy;
+  $("pairedReference").disabled=busy;$("fringeCleanup").disabled=busy;syncBoundaryControls();
   $("restoreCurrent").disabled=busy||!pairIsCurrent(current());
   $("restoreAll").disabled=busy||!pages.some(pairIsCurrent);
   $("pairSummary").textContent="已导入 "+pages.filter(pairIsCurrent).length+" 页 · 已恢复 "+pages.filter(p=>pairIsCurrent(p)&&p.pair.composed).length+" 页 · 已确认 "+reviewed+" 页（仅导出已确认页面）";
@@ -151,7 +157,7 @@ async function composeUsingSource(p,source,returnedFile){
  const b=await decode(returnedFile),c=document.createElement("canvas");
  try{
    const r=matchPublic(p,source,b),m=r.matrix;
-   const strict=!$("fringeCleanup").checked,returnedPixels=rgbaOf(b).data;
+   const settings=selectedBoundary(),strict=settings.exact,returnedPixels=rgbaOf(b).data;
    const rects=rectanglePlan(p.ops,p.shade,source.width,source.height,returnedPixels,b.width,b.height,m);
    if(!r.gridVerified&&rects&&rects.every(q=>q.dst[0]>=6&&q.dst[1]>=6&&q.dst[2]<b.width-6&&q.dst[3]<b.height-6&&q.src[0]>=6&&q.src[1]>=6&&q.src[2]<source.width-6&&q.src[3]<source.height-6&&(q.dst[2]-q.dst[0]+49)*(q.dst[3]-q.dst[1]+49)<=2000000)&&!rects.some((q,i)=>rects.some((v,j)=>i!==j&&q.dst[0]-24<=v.dst[2]&&q.dst[2]+24>=v.dst[0]&&q.dst[1]-24<=v.dst[3]&&q.dst[3]+24>=v.dst[1]))){
      c.width=b.width;c.height=b.height;const ctx=c.getContext("2d",{alpha:false,willReadFrequently:true});
@@ -171,8 +177,8 @@ async function composeUsingSource(p,source,returnedFile){
            const geo=alignPatchContext(sourcePixels.data,ref.data,patch.width,patch.height,pad);
            const tone=matchPatchTone(geo.data,ref.data,patch.width,patch.height,pad,true);
            const localMask=maskFor(patch.width,patch.height,[{kind:"rect",a:[pad,pad],b:[pad+dw-1,pad+dh-1]}]);
-           const feather=Math.min(8,Math.floor(pad/3)),maxHalo=Math.min(16,pad-feather);
-           const merged=restoreBoundary(tone.data,ref.data,localMask,patch.width,patch.height,{maxHalo,feather,exact:strict});
+           const localSettings=selectedBoundary(pad);
+           const merged=restoreBoundary(tone.data,ref.data,localMask,patch.width,patch.height,localSettings);
            ref.data.set(merged.data);
            const halo=merged.halo+merged.feather;
            ctx.putImageData(ref,dst[0]-pad,dst[1]-pad,pad-halo,pad-halo,dw+2*halo,dh+2*halo);
@@ -180,8 +186,9 @@ async function composeUsingSource(p,source,returnedFile){
          }finally{patch.width=patch.height=1;}
        }n+=dw*dh;
      }}finally{original.width=original.height=1;}
-     if(strict){
-       const allowed=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
+     {
+       const projected=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
+       const allowed=boundedWriteMask(projected,b.width,b.height,strict?0:settings.maxHalo+settings.feather);
        const pixels=ctx.getImageData(0,0,c.width,c.height);
        const blocked=preserveOutsideMask(pixels.data,returnedPixels,allowed);
        if(blocked){ctx.putImageData(pixels,0,0);tones.push({applied:false,protected:blocked});}
@@ -194,7 +201,7 @@ async function composeUsingSource(p,source,returnedFile){
    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.setTransform(m[0],m[1],-m[1],m[0],m[2],m[3]);x.drawImage(source,0,0);x.setTransform(1,0,0,1,0,0);
    const original=x.getImageData(0,0,c.width,c.height);
    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(b,0,0);
-   const returned=x.getImageData(0,0,c.width,c.height),merged=restoreBoundary(original.data,returned.data,mask,c.width,c.height,{exact:strict});
+   const returned=x.getImageData(0,0,c.width,c.height),merged=restoreBoundary(original.data,returned.data,mask,c.width,c.height,settings);
    returned.data.set(merged.data);x.putImageData(returned,0,0);return {blob:await png(c),n:merged.core,width:b.width,median:r.pixelMedian,tones:[{fringe:merged.changed,warning:merged.warning||(!rects&&!r.gridVerified)}]};
  }finally{b.close();c.width=c.height=1;}
 }
@@ -214,12 +221,25 @@ async function composePair(p,source,returnedFile){
  finally{if(b)b.close();}
  return primary;
 }
-for(const id of ["pairedReference","fringeCleanup"])$(id).onchange=()=>run(async()=>{
+async function boundaryChanged(id){
  if(id==="fringeCleanup"&&$(id).checked&&!confirm("开启选区外边缘修复可能覆盖邻近翻译文字及气泡。默认关闭以逐像素保护选区外内容。仍要开启？")){$(id).checked=false;return;}
  if(id==="pairedReference"&&$(id).checked&&!confirm("仅适合中日画面一致且遮盖区无版本专属文字的页面。允许在已配对的日文母版显著改善边界时使用其像素？")){$(id).checked=false;return;}
  for(const p of pages)if(pairIsCurrent(p)){p.pair.composed=false;setPairApproval(p,false);}
  clearRestored();if(pairIsCurrent(current()))await showPair(current());
  status("恢复选项已修改，请重新恢复并检查。");
+}
+for(const id of ["pairedReference","fringeCleanup","edgeHalo","edgeFeather"])$(id).onchange=()=>run(async()=>{
+ if(id==="edgeHalo"||id==="edgeFeather"){
+  const opts=selectedBoundary();$("edgeHalo").value=String(opts.maxHalo);$("edgeFeather").value=String(opts.feather);
+  $("edgePreset").value="custom";
+ }
+ await boundaryChanged(id);
+});
+$("edgePreset").onchange=()=>run(async()=>{
+ const presets={gentle:[2,1],balanced:[4,2],legacy:[16,8]};
+ const values=presets[$("edgePreset").value];if(!values)return;
+ $("edgeHalo").value=String(values[0]);$("edgeFeather").value=String(values[1]);
+ await boundaryChanged("edgePreset");
 });
 function applyCompareZoom(){
   const z=$("compareZoom").value;
