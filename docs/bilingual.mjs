@@ -1,3 +1,4 @@
+import {exportFilename} from "./naming.mjs?v=0.9.6-export1";
 import {maskFor} from './core.mjs';
 import {transform,transferMask,invert} from './registration.mjs';
 export const bilingual=p=>p?.role==='中'||p?.role==='日';
@@ -19,15 +20,15 @@ export const snapshot=l=>[l.source,l.target].map(p=>({ops:clone(p.ops),shade:p.s
 export function applySnapshot(l,s){[l.source,l.target].forEach((p,i)=>{p.ops=clone(s[i].ops);p.shade=s[i].shade;p.redo=[];});l.reviewed=false;}
 export const hasMask=p=>!!p?.ops?.length&&maskFor(p.width,p.height,p.ops).some(Boolean);
 export function exportPlan(pages,links){
- const out=[],used=new Set();let n=0;
+ const out=[],used=new Set();
  for(const p of pages){if(used.has(p))continue;
  if(bilingual(p)){
  const l=linkFor(links,p),q=l&&other(l,p);
  if(!q||!pages.includes(q)||!opposite(p,q)||used.has(q))throw Error('请完成中日同页配对：'+p.file.name);
  if(!hasMask(p)||!hasMask(q))throw Error('中日两侧必须都有有效选区：'+p.file.name);
  if(!l.reviewed)throw Error('请确认两侧遮盖：'+p.file.name);
- used.add(p);used.add(q);const k=String(++n).padStart(4,'0');
- for(const v of (p.role==='中'?[p,q]:[q,p]))out.push({page:v,name:k+'_'+(v.role==='中'?'CN':'JP')+'_redacted.png'});
- }else if(hasMask(p)){used.add(p);out.push({page:p,name:String(++n).padStart(4,'0')+'_redacted.png'});}
+ used.add(p);used.add(q);
+ for(const v of (p.role==='中'?[p,q]:[q,p]))out.push({page:v,name:exportFilename(pages,pages.indexOf(v),'redacted')});
+ }else if(hasMask(p)){used.add(p);out.push({page:p,name:exportFilename(pages,pages.indexOf(p),'redacted')});}
  }if(!out.length)throw Error('没有可导出的选区');return out;
 }
