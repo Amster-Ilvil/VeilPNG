@@ -5,7 +5,7 @@ import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mj
 import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages} from "./pairing.mjs?v=0.9.6-export1";
 import {projectRecord,matchProject,validRole,checkpoint} from "./project.mjs?v=0.9.6-export1";
 import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.6-export1";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.6-export1";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.6-edgefix1";
 import {readPublicZip} from "./zip-read.mjs?v=0.9.6-export1";
 import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.6-export1";
 import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.6-export1";
@@ -438,13 +438,13 @@ $("batchReturnFile").onchange=()=>{const input=Array.from($("batchReturnFile").f
  if(!files.length||files.length>32||files.reduce((n,f)=>n+f.size,0)>TOTAL)throw Error("回传图最多 32 张，合计 80 MB");
  const staged=new Map(),role=$("returnRole").value;
  for(const f of files){
-   status("正在识别回传图 "+f.name);const b=await decode(f),hits=[];
+   status("正在识别回传图 "+f.name);const b=await decode(f),hits=[],failures=[];
    try{
      for(let i=0;i<pages.length;i++){const p=pages[i],hint=roleFromPublicName(f.name);if(!marked(p)||(role&&p.role!==role)||(hint&&p.role!==hint))continue;
-       const src=await decode(p.file);try{let r;try{r=matchPublic(p,src,b);projectedMask(maskFor(p.width,p.height,p.ops),p.width,p.height,b.width,b.height,r.matrix);}catch{continue;}hits.push({i,...r});}finally{src.close();}
+       const src=await decode(p.file);try{let r;try{r=matchPublic(p,src,b);projectedMask(maskFor(p.width,p.height,p.ops),p.width,p.height,b.width,b.height,r.matrix);}catch(e){failures.push(p.file.name+"："+String(e.message||e));continue;}hits.push({i,...r});}finally{src.close();}
      }
      let hit;const candidates=hits.filter(r=>r.inliers>=20&&r.inliers/r.matches>=.35).sort((a,b)=>b.inliers-a.inliers);
-     try{hit=chooseMatch(hits);}catch(e){if(candidates.length<2)throw e;const answer=prompt("返回图来源不唯一，请选择正确原图（输入编号，取消则终止导入）：\n"+f.name+"\n"+candidates.map((r,k)=>(k+1)+" · ["+pages[r.i].role+"] "+pages[r.i].file.name+" · 内点 "+r.inliers+" · 误差 "+r.pixelMedian.toFixed(2)+" px").join("\n"));if(answer===null)return;if(!/^[0-9]+$/.test(answer.trim())||!candidates[Number(answer)-1])throw Error("未选择有效来源");hit=candidates[Number(answer)-1];}
+     try{hit=chooseMatch(hits);}catch(e){if(candidates.length<2){if(!hits.length&&failures.length)throw Error(f.name+"："+failures.slice(0,3).join("；"));throw e;}const answer=prompt("返回图来源不唯一，请选择正确原图（输入编号，取消则终止导入）：\n"+f.name+"\n"+candidates.map((r,k)=>(k+1)+" · ["+pages[r.i].role+"] "+pages[r.i].file.name+" · 内点 "+r.inliers+" · 误差 "+r.pixelMedian.toFixed(2)+" px").join("\n"));if(answer===null)return;if(!/^[0-9]+$/.test(answer.trim())||!candidates[Number(answer)-1])throw Error("未选择有效来源");hit=candidates[Number(answer)-1];}
      if(staged.has(hit.i))throw Error("多个返回图匹配到同一原图："+f.name);
      staged.set(hit.i,f);
    }finally{b.close();}
