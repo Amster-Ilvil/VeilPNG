@@ -8,7 +8,7 @@
 
 **[打开 VeilPNG 网页版](https://amster-ilvil.github.io/VeilPNG/)**
 
-- 网页版：v0.9.7，无需安装，在浏览器中处理图片。
+- 网页版：v0.9.8，无需安装，在浏览器中处理图片。
 - 桌面版：v0.6.4，支持 Windows、macOS、Linux。
 - [版本发布与下载](https://github.com/Amster-Ilvil/VeilPNG/releases)
 

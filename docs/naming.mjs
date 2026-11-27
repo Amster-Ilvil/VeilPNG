@@ -23,5 +23,8 @@ export function safePublicName(name){
 }
 export function matchesExportName(pages,filename){
  const stem=String(filename).replace(/\.(?:png|jpe?g|webp)$/i,'');
- return exportPrefixes(pages).flatMap((p,i)=>[p,p+'_redacted',p+'_returned',p+'_restored'].some(n=>key(n)===key(stem))?[i]:[]);
+ const prefixes=exportPrefixes(pages);
+ const find=s=>prefixes.flatMap((p,i)=>[p,p+'_redacted',p+'_returned',p+'_restored'].some(n=>key(n)===key(s))?[i]:[]);
+ const exact=find(stem);return exact.length?exact:find(stem.replace(/\s*\(\d+\)$/,''));
+
 }
