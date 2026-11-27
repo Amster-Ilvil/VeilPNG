@@ -21,3 +21,10 @@ export function restoreBoundary(source,returned,mask,w,h,{maxHalo=16,feather=8,e
  let changed=0;if(guard)for(let y=t;y<=b;y++)for(let x=l;x<=r;x++){let i=y*w+x,d=dist[i];if(!d||d>=guard+feather)continue;let z=Math.max(0,Math.min(1,(d-guard)/feather)),v=1-z*z*(3-2*z),p=i*4,any=false;for(let c=0;c<4;c++){out[p+c]=Math.round(source[p+c]*v+returned[p+c]*(1-v));any||=out[p+c]!==returned[p+c];}if(any)changed++;}
  return {data:out,core,halo:guard,feather:guard?feather:0,changed,noise,warning:guard===maxHalo};
 }
+
+// Final write-domain guard: keep the returned image byte-for-byte outside the mapped mask.
+export function preserveOutsideMask(candidate,returned,mask){
+ if(candidate.length!==returned.length||candidate.length!==mask.length*4)throw Error('Invalid protection mask');
+ let blocked=0;for(let i=0;i<mask.length;i++){if(mask[i])continue;const p=i*4;if(candidate[p]!==returned[p]||candidate[p+1]!==returned[p+1]||candidate[p+2]!==returned[p+2]||candidate[p+3]!==returned[p+3]){candidate.set(returned.subarray(p,p+4),p);blocked++;}}
+ return blocked;
+}

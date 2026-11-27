@@ -13,7 +13,7 @@ import {webpDimensions} from "./webp.mjs?v=0.9.6-export1";
 import {rectanglePlan} from "./local-rect.mjs?v=0.9.6-export1";
 import {matchPatchTone} from "./tone.mjs?v=0.9.6-export1";
 import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.6-export1";
-import {restoreBoundary} from "./return-boundary.mjs?v=0.9.6-export1";
+import {restoreBoundary,preserveOutsideMask} from "./return-boundary.mjs?v=0.9.6-protect1";
 import {preferPairedReference} from "./paired-reference.mjs?v=0.9.6-export1";
 
 import {verifiedOriginal} from "./original-export.mjs?v=0.9.6-export1";
@@ -151,7 +151,8 @@ async function composeUsingSource(p,source,returnedFile){
  const b=await decode(returnedFile),c=document.createElement("canvas");
  try{
    const r=matchPublic(p,source,b),m=r.matrix;
-   const rects=rectanglePlan(p.ops,p.shade,source.width,source.height,rgbaOf(b).data,b.width,b.height,m);
+   const strict=!$("fringeCleanup").checked,returnedPixels=rgbaOf(b).data;
+   const rects=rectanglePlan(p.ops,p.shade,source.width,source.height,returnedPixels,b.width,b.height,m);
    if(!r.gridVerified&&rects&&rects.every(q=>q.dst[0]>=6&&q.dst[1]>=6&&q.dst[2]<b.width-6&&q.dst[3]<b.height-6&&q.src[0]>=6&&q.src[1]>=6&&q.src[2]<source.width-6&&q.src[3]<source.height-6&&(q.dst[2]-q.dst[0]+49)*(q.dst[3]-q.dst[1]+49)<=2000000)&&!rects.some((q,i)=>rects.some((v,j)=>i!==j&&q.dst[0]-24<=v.dst[2]&&q.dst[2]+24>=v.dst[0]&&q.dst[1]-24<=v.dst[3]&&q.dst[3]+24>=v.dst[1]))){
      c.width=b.width;c.height=b.height;const ctx=c.getContext("2d",{alpha:false,willReadFrequently:true});
      ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(b,0,0);
@@ -171,7 +172,7 @@ async function composeUsingSource(p,source,returnedFile){
            const tone=matchPatchTone(geo.data,ref.data,patch.width,patch.height,pad,true);
            const localMask=maskFor(patch.width,patch.height,[{kind:"rect",a:[pad,pad],b:[pad+dw-1,pad+dh-1]}]);
            const feather=Math.min(8,Math.floor(pad/3)),maxHalo=Math.min(16,pad-feather);
-           const merged=restoreBoundary(tone.data,ref.data,localMask,patch.width,patch.height,{maxHalo,feather,exact:!$("fringeCleanup").checked});
+           const merged=restoreBoundary(tone.data,ref.data,localMask,patch.width,patch.height,{maxHalo,feather,exact:strict});
            ref.data.set(merged.data);
            const halo=merged.halo+merged.feather;
            ctx.putImageData(ref,dst[0]-pad,dst[1]-pad,pad-halo,pad-halo,dw+2*halo,dh+2*halo);
@@ -179,6 +180,12 @@ async function composeUsingSource(p,source,returnedFile){
          }finally{patch.width=patch.height=1;}
        }n+=dw*dh;
      }}finally{original.width=original.height=1;}
+     if(strict){
+       const allowed=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
+       const pixels=ctx.getImageData(0,0,c.width,c.height);
+       const blocked=preserveOutsideMask(pixels.data,returnedPixels,allowed);
+       if(blocked){ctx.putImageData(pixels,0,0);tones.push({applied:false,protected:blocked});}
+     }
      return {blob:await png(c),n,width:b.width,median:r.pixelMedian,localRects:rects.length,rects,tones};
    }
    // Use the validated global transform when local solid bounds cannot be measured (e.g. page edge).
@@ -187,7 +194,7 @@ async function composeUsingSource(p,source,returnedFile){
    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.setTransform(m[0],m[1],-m[1],m[0],m[2],m[3]);x.drawImage(source,0,0);x.setTransform(1,0,0,1,0,0);
    const original=x.getImageData(0,0,c.width,c.height);
    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(b,0,0);
-   const returned=x.getImageData(0,0,c.width,c.height),merged=restoreBoundary(original.data,returned.data,mask,c.width,c.height,{exact:!$("fringeCleanup").checked});
+   const returned=x.getImageData(0,0,c.width,c.height),merged=restoreBoundary(original.data,returned.data,mask,c.width,c.height,{exact:strict});
    returned.data.set(merged.data);x.putImageData(returned,0,0);return {blob:await png(c),n:merged.core,width:b.width,median:r.pixelMedian,tones:[{fringe:merged.changed,warning:merged.warning||(!rects&&!r.gridVerified)}]};
  }finally{b.close();c.width=c.height=1;}
 }
@@ -208,6 +215,7 @@ async function composePair(p,source,returnedFile){
  return primary;
 }
 for(const id of ["pairedReference","fringeCleanup"])$(id).onchange=()=>run(async()=>{
+ if(id==="fringeCleanup"&&$(id).checked&&!confirm("开启选区外边缘修复可能覆盖邻近翻译文字及气泡。默认关闭以逐像素保护选区外内容。仍要开启？")){$(id).checked=false;return;}
  if(id==="pairedReference"&&$(id).checked&&!confirm("仅适合中日画面一致且遮盖区无版本专属文字的页面。允许在已配对的日文母版显著改善边界时使用其像素？")){$(id).checked=false;return;}
  for(const p of pages)if(pairIsCurrent(p)){p.pair.composed=false;setPairApproval(p,false);}
  clearRestored();if(pairIsCurrent(current()))await showPair(current());
