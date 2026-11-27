@@ -1,3 +1,4 @@
+import {safePublicName} from "./naming.mjs?v=0.9.7";
 function maskFor(w,h,ops){
   const m=new Uint8Array(w*h);
   const put=(x,y,r,v)=>{const y0=Math.max(0,Math.ceil(y-r)),y1=Math.min(h-1,Math.floor(y+r));for(let j=y0;j<=y1;j++){const dx=Math.sqrt(Math.max(0,r*r-(j-y)*(j-y)));const a=Math.max(0,Math.ceil(x-dx)),b=Math.min(w-1,Math.floor(x+dx));if(b>=a)m.fill(v,j*w+a,j*w+b+1);}};
@@ -19,12 +20,12 @@ function crc32(bytes){let c=0xffffffff;for(const b of bytes){c^=b;for(let i=0;i<
 function zipStore(entries,mode='public'){
   const chunks=[],central=[],seen=new Set();let offset=0,cs=0;
   for(const e of entries){
-    const name=Uint8Array.from(e.name,c=>c.charCodeAt(0));const data=e.data;
-    if(!(mode==="private"?/^(?:project\.json|original_[0-9]{4}\.(?:png|jpg|webp))$/:/^[0-9]{4}_(?:(?:CN|JP)_redacted|redacted|restored)\.png$/).test(e.name)||seen.has(e.name))throw Error("Invalid or duplicate output filename");seen.add(e.name);
+    const name=new TextEncoder().encode(e.name);const data=e.data;
+    if(!(mode==="private"?/^(?:project\.json|original_[0-9]{4}\.(?:png|jpg|webp))$/.test(e.name):safePublicName(e.name))||seen.has(e.name.normalize('NFC').toLowerCase()))throw Error("Invalid or duplicate output filename");seen.add(e.name.normalize('NFC').toLowerCase());
     const crc=crc32(data),a=new Uint8Array(30+name.length),v=new DataView(a.buffer);
-    v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(12,33,true);v.setUint32(14,crc,true);v.setUint32(18,data.length,true);v.setUint32(22,data.length,true);v.setUint16(26,name.length,true);a.set(name,30);
+    v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(6,0x0800,true);v.setUint16(12,33,true);v.setUint32(14,crc,true);v.setUint32(18,data.length,true);v.setUint32(22,data.length,true);v.setUint16(26,name.length,true);a.set(name,30);
     const b=new Uint8Array(46+name.length),z=new DataView(b.buffer);
-    z.setUint32(0,0x02014b50,true);z.setUint16(4,20,true);z.setUint16(6,20,true);z.setUint16(14,33,true);z.setUint32(16,crc,true);z.setUint32(20,data.length,true);z.setUint32(24,data.length,true);z.setUint16(28,name.length,true);z.setUint32(42,offset,true);b.set(name,46);
+    z.setUint32(0,0x02014b50,true);z.setUint16(4,20,true);z.setUint16(6,20,true);z.setUint16(8,0x0800,true);z.setUint16(14,33,true);z.setUint32(16,crc,true);z.setUint32(20,data.length,true);z.setUint32(24,data.length,true);z.setUint16(28,name.length,true);z.setUint32(42,offset,true);b.set(name,46);
     chunks.push(a,data);central.push(b);offset+=a.length+data.length;cs+=b.length;
   }
   if(offset+cs>0xffffffff||entries.length>65535)throw Error("ZIP too large");

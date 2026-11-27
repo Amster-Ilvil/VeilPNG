@@ -1,20 +1,21 @@
-import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.6";
-import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.6";
-import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages,restoredName} from "./pairing.mjs?v=0.9.6";
-import {projectRecord,matchProject,validRole,returnIndex,checkpoint} from "./project.mjs?v=0.9.6";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.6";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.6";
-import {readPublicZip} from "./zip-read.mjs?v=0.9.6";
-import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.6";
-import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.6";
-import {webpDimensions} from "./webp.mjs?v=0.9.6";
-import {rectanglePlan} from "./local-rect.mjs?v=0.9.6";
-import {matchPatchTone} from "./tone.mjs?v=0.9.6";
-import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.6";
-import {restoreBoundary} from "./return-boundary.mjs?v=0.9.6";
-import {preferPairedReference} from "./paired-reference.mjs?v=0.9.6";
+import {exportFilename,matchesExportName} from "./naming.mjs?v=0.9.7";
+import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=0.9.7";
+import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=0.9.7";
+import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages} from "./pairing.mjs?v=0.9.7";
+import {projectRecord,matchProject,validRole,checkpoint} from "./project.mjs?v=0.9.7";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=0.9.7";
+import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=0.9.7";
+import {readPublicZip} from "./zip-read.mjs?v=0.9.7";
+import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=0.9.7";
+import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=0.9.7";
+import {webpDimensions} from "./webp.mjs?v=0.9.7";
+import {rectanglePlan} from "./local-rect.mjs?v=0.9.7";
+import {matchPatchTone} from "./tone.mjs?v=0.9.7";
+import {alignPatchContext} from "./patch-geometry.mjs?v=0.9.7";
+import {restoreBoundary} from "./return-boundary.mjs?v=0.9.7";
+import {preferPairedReference} from "./paired-reference.mjs?v=0.9.7";
 
-import {verifiedOriginal} from "./original-export.mjs?v=0.9.6";
+import {verifiedOriginal} from "./original-export.mjs?v=0.9.7";
 const $=id=>document.getElementById(id);
 const ui={files:$("files"),queue:$("queue"),preview:$("preview"),gesture:$("gesture"),stack:$("stack"),empty:$("empty"),status:$("status"),tool:$("tool"),radius:$("radius"),shade:$("shade"),undo:$("undo"),redo:$("redo"),clearMask:$("clearMask"),clearAll:$("clearAll"),exportOne:$("exportOne"),exportAll:$("exportAll")};
 const LIMIT=12_000_000,MAX=20*1024*1024,TOTAL=80*1024*1024;
@@ -74,9 +75,9 @@ ui.shade.onchange=()=>{if(current())editLinked((p,q)=>{p.shade=Number(ui.shade.v
 ui.clearAll.onclick=()=>{if(!pages.length||confirm("清空全部图片和选区？")){if(bitmap)bitmap.close();bitmap=null;clearRestored();clearAlignment();links=[];pages=[];refreshPartner();index=-1;count=0;drag=null;ui.stack.hidden=true;ui.empty.hidden=false;for(const c of [ui.preview,ui.gesture]){c.width=1;c.height=1;}status("尚未导入图片");controls();markDirty();}};
 function png(c){return new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(Error("PNG 编码失败")),"image/png"));}
 function download(blob,name){const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
-const name=i=>String(i+1).padStart(4,"0")+"_redacted.png";
+
 async function exportPage(p){const b=await decode(p.file),c=document.createElement("canvas");try{if(!draw(b,p,c))return null;return await png(c);}finally{b.close();c.width=1;c.height=1;}}
-ui.exportOne.onclick=()=>run(async()=>{if(bilingual(current()))throw Error("中日图片请一起导出 ZIP");if($("autosave").checked)await flushCheckpoint();else if(!confirm("确认已保存项目记录并保留原图？"))return;const b=await exportPage(current());if(!b)throw Error("选区为空");download(b,name(index));status("当前 PNG 已生成");});
+ui.exportOne.onclick=()=>run(async()=>{if(bilingual(current()))throw Error("中日图片请一起导出 ZIP");if($("autosave").checked)await flushCheckpoint();else if(!confirm("确认已保存项目记录并保留原图？"))return;const b=await exportPage(current());if(!b)throw Error("选区为空");download(b,exportFilename(pages,index,"redacted"));status("当前 PNG 已生成");});
 ui.exportAll.onclick=()=>run(async()=>{
  const plan=exportPlan(pages,links);
  if($("autosave").checked)await flushCheckpoint();else if(savedRevision!==revision){if(!confirm("同时下载私人完整工程 ZIP 和公开中日 ZIP？私人包包含原图，仅供本地恢复，请勿外传。"))return;await saveProjectRecord();}
@@ -90,7 +91,7 @@ function syncReturnControls(){
   $("loadRecord").disabled=busy||!current();
   $("loadReturn").disabled=busy||!current()||count===0;
   const reviewed=reviewedPages(pages).length;
-  $("exportRestored").disabled=busy||!restoredBlob||!pairIsApproved(current());
+  $("exportRestored").disabled=busy||!restoredBlob||!pairIsCurrent(current())||!current()?.pair?.composed;
   $("exportBatch").disabled=busy||!reviewed;
   $("approvePair").disabled=busy||!restoredBlob||!pairIsCurrent(current());
   $("approvePair").checked=pairIsApproved(current());
@@ -110,7 +111,7 @@ function clearRestored(){
 $("saveRecord").onclick=()=>run(async()=>{
   const p=current();if(!p||!bitmap||!count)throw Error("没有有效遮盖选区");
   const r=maskRecord(bitmap.width,bitmap.height,await sourceHash(p.file),p.ops,p.shade);
-  download(new Blob([JSON.stringify(r)],{type:"application/json"}),String(index+1).padStart(4,"0")+"_local_mask.json");
+  download(new Blob([JSON.stringify(r)],{type:"application/json"}),exportFilename(pages,index,"local_mask"));
   status("遮盖记录已生成：仅本地保存，不要与公开预览一同上传。");
 });
 $("loadRecord").onclick=()=>$("recordFile").click();
@@ -247,8 +248,9 @@ for(const [a,b] of [["returnViewport","restoredViewport"],["restoredViewport","r
   });
 }
 $("exportRestored").onclick=()=>run(async()=>{
-  if(!restoredBlob||!pairIsApproved(current()))throw Error("请先检查并确认当前页");
-  download(restoredBlob,restoredName(index));status("恢复 PNG 已生成");
+  if(!restoredBlob||!pairIsCurrent(current())||!current()?.pair?.composed)throw Error("请先恢复当前页");
+  if(!pairIsApproved(current())){if(!confirm("确认当前恢复图正确？导出文件包含私人内容，请保存在本地。"))return;setPairApproval(current(),true);}
+  download(restoredBlob,exportFilename(pages,index,"restored"));status("恢复 PNG 已生成");
 });
 $("exportBatch").onclick=()=>run(async()=>{
   const ids=reviewedPages(pages);if(!ids.length)throw Error("没有已确认的页面");
@@ -261,7 +263,7 @@ $("exportBatch").onclick=()=>run(async()=>{
     try{
       const {blob}=await composePair(p,source,p.pair.file);total+=blob.size;
       if(total>128*1024*1024)throw Error("恢复 ZIP 超过 128 MB，请分批确认和导出");
-      entries.push({name:restoredName(i),data:new Uint8Array(await blob.arrayBuffer())});
+      entries.push({name:exportFilename(pages,i,"restored"),data:new Uint8Array(await blob.arrayBuffer())});
     }finally{source.close();}
   }
   download(new Blob(zipStore(entries),{type:"application/zip"}),"veilpng_restored.zip");
@@ -433,7 +435,7 @@ $("batchReturnFile").onchange=()=>{const input=Array.from($("batchReturnFile").f
  for(const f of files){
    status("正在识别回传图 "+f.name);const b=await decode(f),hits=[];
    try{
-     for(let i=0;i<pages.length;i++){const p=pages[i],hint=roleFromPublicName(f.name);if(!marked(p)||(role&&p.role!==role)||(hint&&p.role!==hint))continue;
+     for(let i=0;i<pages.length;i++){const p=pages[i],hint=matchesExportName(pages,f.name).length?"":roleFromPublicName(f.name);if(!marked(p)||(role&&p.role!==role)||(hint&&p.role!==hint))continue;
        const src=await decode(p.file);try{let r;try{r=matchPublic(p,src,b);projectedMask(maskFor(p.width,p.height,p.ops),p.width,p.height,b.width,b.height,r.matrix);}catch{continue;}hits.push({i,...r});}finally{src.close();}
      }
      let hit;const candidates=hits.filter(r=>r.inliers>=20&&r.inliers/r.matches>=.35).sort((a,b)=>b.inliers-a.inliers);
