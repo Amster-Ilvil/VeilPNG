@@ -4,8 +4,9 @@ import {maskFor,redactRGBA,zipStore} from "./core.mjs?v=1.0";
 import {sourceHash,maskRecord,loadMaskRecord,restoreRGBA} from "./return-core.mjs?v=1.0";
 import {pairIsCurrent,pairIsApproved,attachPair,invalidatePair,setPairApproval,reviewedPages} from "./pairing.mjs?v=1.0";
 import {projectRecord,matchProject,validRole,checkpoint} from "./project.mjs?v=1.0";
-import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=1.0";
-import {projectedMask,recoverRectangles,chooseMatch} from "./recovery.mjs?v=1.0";
+import {registerGray,toPixels,invert,transform,transferMask} from "./registration.mjs?v=1.0.3";
+import {projectedMask,assertMaskBounds,recoverRectangles,chooseMatch} from "./recovery.mjs?v=1.0.3";
+import {verifiedFrameResize,frameMatrix} from "./frame-resize.mjs?v=1.0.3";
 import {readPublicZip} from "./zip-read.mjs?v=1.0";
 import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=1.0";
 import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=1.0";
@@ -150,7 +151,17 @@ function matchPublic(p,source,b){
      }
      if(total>=64&&good/total>=.90&&texture>=20&&textureGood/texture>=.85)return {matrix:[1,0,0,0],inliers:good,matches:total,pixelMedian:0,gridVerified:true};
    }
-   return registerImages(c,b);
+   const r=registerImages(c,b,true);
+   if(r.frameCandidate){
+     const mask=maskFor(c.width,c.height,p.ops);
+     try{assertMaskBounds(mask,c.width,c.height,b.width,b.height,r.matrix);}
+     catch(e){
+       if(e.message!=="遮盖区域超出回传图边界，拒绝恢复")throw e;
+       assertMaskBounds(mask,c.width,c.height,b.width,b.height,r.frameCandidate.matrix);
+       return {...r,...r.frameCandidate,frameVerified:true};
+     }
+   }
+   return r;
  }finally{c.width=c.height=1;}
 }
 async function composeUsingSource(p,source,returnedFile){
@@ -158,7 +169,7 @@ async function composeUsingSource(p,source,returnedFile){
  try{
    const r=matchPublic(p,source,b),m=r.matrix;
    const settings=selectedBoundary(),strict=settings.exact,returnedPixels=rgbaOf(b).data;
-   const rects=rectanglePlan(p.ops,p.shade,source.width,source.height,returnedPixels,b.width,b.height,m);
+   const rects=r.frameVerified?null:rectanglePlan(p.ops,p.shade,source.width,source.height,returnedPixels,b.width,b.height,m);
    if(!r.gridVerified&&rects&&rects.every(q=>q.dst[0]>=6&&q.dst[1]>=6&&q.dst[2]<b.width-6&&q.dst[3]<b.height-6&&q.src[0]>=6&&q.src[1]>=6&&q.src[2]<source.width-6&&q.src[3]<source.height-6&&(q.dst[2]-q.dst[0]+49)*(q.dst[3]-q.dst[1]+49)<=2000000)&&!rects.some((q,i)=>rects.some((v,j)=>i!==j&&q.dst[0]-24<=v.dst[2]&&q.dst[2]+24>=v.dst[0]&&q.dst[1]-24<=v.dst[3]&&q.dst[3]+24>=v.dst[1]))){
      c.width=b.width;c.height=b.height;const ctx=c.getContext("2d",{alpha:false,willReadFrequently:true});
      ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);ctx.drawImage(b,0,0);
@@ -205,11 +216,11 @@ async function composeUsingSource(p,source,returnedFile){
    // Use the validated global transform when local solid bounds cannot be measured (e.g. page edge).
    const mask=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
    c.width=b.width;c.height=b.height;const x=c.getContext("2d",{alpha:false,willReadFrequently:true});
-   x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.setTransform(m[0],m[1],-m[1],m[0],m[2],m[3]);x.drawImage(source,0,0);x.setTransform(1,0,0,1,0,0);
+   x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);if(r.frameVerified)x.setTransform(m[0],0,0,m[5],0,0);else x.setTransform(m[0],m[1],-m[1],m[0],m[2],m[3]);x.drawImage(source,0,0);x.setTransform(1,0,0,1,0,0);
    const original=x.getImageData(0,0,c.width,c.height);
    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(b,0,0);
    const returned=x.getImageData(0,0,c.width,c.height),merged=restoreBoundary(original.data,returned.data,mask,c.width,c.height,settings);
-   returned.data.set(merged.data);x.putImageData(returned,0,0);return {blob:await png(c),n:merged.core,width:b.width,median:r.pixelMedian,tones:[{fringe:merged.changed,warning:merged.warning||(!rects&&!r.gridVerified)}]};
+   returned.data.set(merged.data);x.putImageData(returned,0,0);return {blob:await png(c),n:merged.core,width:b.width,median:r.pixelMedian,frameVerified:!!r.frameVerified,tones:[{fringe:merged.changed,warning:merged.warning||(!rects&&!r.gridVerified)}]};
  }finally{b.close();c.width=c.height=1;}
 }
 async function composePair(p,source,returnedFile){
@@ -260,7 +271,7 @@ function presentPair(p,result){
   restoredURL=URL.createObjectURL(restoredBlob);returnedURL=URL.createObjectURL(result.alignedBlob||p.pair.file);
   $("restoredImage").src=restoredURL;$("restoredImage").hidden=false;$("restoreWaiting").hidden=true;$("returnedImage").src=returnedURL;
   $("returnPreview").hidden=false;applyCompareZoom();
-  status("恢复 "+result.n+" 像素 · "+(result.sourceLabel||"对应原图")+(result.referenceNote?" · "+result.referenceNote:"")+(result.tones?" · 窄边清理 "+result.tones.reduce((n,t)=>n+(t.fringe||0),0)+" 像素 · 接缝细线修正 "+result.tones.reduce((n,t)=>n+(t.join||0),0)+" 像素":"")+" · "+(result.localRects?"局部矩形 "+result.localRects+" 处":"全局映射（请仔细核对）")+(result.rects?.some(q=>q.inferredEdge!==undefined)?" · 存在几何估算边界，请核对接缝":"")+(result.tones?" · 色调校正 "+result.tones.filter(t=>t.applied).length+" 处 · 位移校正 "+result.tones.filter(t=>t.geometry).length+" 处"+(result.tones.some(t=>t.warning)?" · 注意：部分接缝仍不可靠，须人工检查":""):"")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
+  status("恢复 "+result.n+" 像素 · "+(result.sourceLabel||"对应原图")+(result.referenceNote?" · "+result.referenceNote:"")+(result.tones?" · 窄边清理 "+result.tones.reduce((n,t)=>n+(t.fringe||0),0)+" 像素 · 接缝细线修正 "+result.tones.reduce((n,t)=>n+(t.join||0),0)+" 像素":"")+" · "+(result.localRects?"局部矩形 "+result.localRects+" 处":result.frameVerified?"整页横纵缩放校验（请仔细核对）":"全局映射（请仔细核对）")+(result.rects?.some(q=>q.inferredEdge!==undefined)?" · 存在几何估算边界，请核对接缝":"")+(result.tones?" · 色调校正 "+result.tones.filter(t=>t.applied).length+" 处 · 位移校正 "+result.tones.filter(t=>t.geometry).length+" 处"+(result.tones.some(t=>t.warning)?" · 注意：部分接缝仍不可靠，须人工检查":""):"")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
 }
 async function showPair(p){if(!pairIsCurrent(p))return;if(p.pair.composed){presentPair(p,await composePair(p,bitmap,p.pair.file));}else{clearRestored();const b=await decode(p.pair.file);try{compareWidth=b.width;}finally{b.close();}returnedURL=URL.createObjectURL(p.pair.file);$("returnedImage").src=returnedURL;$("returnPreview").hidden=false;applyCompareZoom();status("返回图已导入："+p.pair.file.name+"。点击恢复遮盖区域。");}}
 $("restoreCurrent").onclick=()=>run(async()=>{const p=current();if(!pairIsCurrent(p))throw Error("先导入对应返回图");const result=await composePair(p,bitmap,p.pair.file);p.pair.composed=true;setPairApproval(p,false);presentPair(p,result);$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});});
@@ -396,9 +407,11 @@ function grayThumbnail(source){
   for(let i=0;i<data.length;i++)data[i]=Math.round(.299*rgba[4*i]+.587*rgba[4*i+1]+.114*rgba[4*i+2]);
   c.width=c.height=1;return {w,h:600,scale,data};
 }
-function registerImages(source,target){
-  const a=grayThumbnail(source),b=grayThumbnail(target),r=registerGray(a,b);
-  return {...r,matrix:toPixels(r.matrix,a.scale,b.scale),pixelMedian:r.median/b.scale};
+function registerImages(source,target,withFrame=false){
+  const a=grayThumbnail(source),b=grayThumbnail(target),{points,...r}=registerGray(a,b,withFrame);
+  const evidence=withFrame?verifiedFrameResize(points,r.matches,a.w,a.h,b.w,b.h):null;
+  const frameCandidate=evidence?{...evidence,matrix:frameMatrix(source.width,source.height,target.width,target.height),pixelMedian:evidence.median/b.scale}:null;
+  return {...r,matrix:toPixels(r.matrix,a.scale,b.scale),pixelMedian:r.median/b.scale,frameCandidate};
 }
 function clearAlignment(){
   alignment=null;$("registrationPanel").hidden=true;

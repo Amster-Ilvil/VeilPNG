@@ -1,10 +1,13 @@
 import {transform,invert} from './registration.mjs';
-export function projectedMask(mask,sw,sh,tw,th,m){
+export function assertMaskBounds(mask,sw,sh,tw,th,m){
  if(mask.length!==sw*sh||!m.every(Number.isFinite))throw Error('无效遮盖映射');
  let n=0,clipped=0;for(let y=0;y<sh;y++)for(let x=0;x<sw;x++)if(mask[y*sw+x]){n++;const [u,v]=transform(m,x,y);if(u<-.5||v<-.5||u>tw-.5||v>th-.5)clipped++;}
  if(!n||clipped)throw Error('遮盖区域超出回传图边界，拒绝恢复');
+}
+export function projectedMask(mask,sw,sh,tw,th,m){
+ assertMaskBounds(mask,sw,sh,tw,th,m);
  const inv=invert(m),out=new Uint8Array(tw*th);let count=0;
- for(let y=0;y<th;y++)for(let x=0;x<tw;x++){const sx=Math.round(inv[0]*x-inv[1]*y+inv[2]),sy=Math.round(inv[1]*x+inv[0]*y+inv[3]);if(sx>=0&&sy>=0&&sx<sw&&sy<sh&&mask[sy*sw+sx]){out[y*tw+x]=1;count++;}}
+ for(let y=0;y<th;y++)for(let x=0;x<tw;x++){const sx=Math.round(inv[0]*x+(inv[4]??-inv[1])*y+inv[2]),sy=Math.round(inv[1]*x+(inv[5]??inv[0])*y+inv[3]);if(sx>=0&&sy>=0&&sx<sw&&sy<sh&&mask[sy*sw+sx]){out[y*tw+x]=1;count++;}}
  if(!count)throw Error('映射后遮盖为空');return out;
 }
 export function recoverRectangles(original,redacted,w,h){
