@@ -229,7 +229,7 @@ async function composePair(p,source,returnedFile){
  return primary;
 }
 async function boundaryChanged(id){
- if(id==="fringeCleanup"&&$(id).checked&&!confirm("开启选区外边缘修复可能覆盖邻近翻译文字及气泡。默认关闭以逐像素保护选区外内容。仍要开启？")){$(id).checked=false;return;}
+ if(id==="fringeCleanup"&&$(id).checked&&!confirm("开启选区外边缘修复可能覆盖邻近翻译文字及气泡。关闭时逐像素保护选区外内容。仍要开启？")){$(id).checked=false;return;}
  if(id==="pairedReference"&&$(id).checked&&!confirm("仅适合中日画面一致且遮盖区无版本专属文字的页面。允许在已配对的日文母版显著改善边界时使用其像素？")){$(id).checked=false;return;}
  for(const p of pages)if(pairIsCurrent(p)){p.pair.composed=false;setPairApproval(p,false);}
  clearRestored();if(pairIsCurrent(current()))await showPair(current());
