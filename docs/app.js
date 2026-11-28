@@ -10,7 +10,7 @@ import {readPublicZip} from "./zip-read.mjs?v=1.0";
 import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=1.0";
 import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=1.0";
 import {webpDimensions} from "./webp.mjs?v=1.0";
-import {rectanglePlan} from "./local-rect.mjs?v=1.0.1";
+import {rectanglePlan} from "./local-rect.mjs?v=1.0.2";
 import {matchPatchTone} from "./tone.mjs?v=1.0";
 import {alignPatchContext} from "./patch-geometry.mjs?v=1.0";
 import {restoreBoundary,preserveOutsideMask,boundaryOptions,boundedWriteMask} from "./return-boundary.mjs?v=1.0";
@@ -182,7 +182,7 @@ async function composeUsingSource(p,source,returnedFile){
            ref.data.set(merged.data);
            const halo=merged.halo+merged.feather;
            ctx.putImageData(ref,dst[0]-pad,dst[1]-pad,pad-halo,pad-halo,dw+2*halo,dh+2*halo);
-           tones.push({applied:tone.applied,geometry:geo.applied,before:tone.before,after:tone.after,contextCorrelation:geo.after,fringe:merged.changed,join:0,warning:merged.warning||tone.after===null||tone.after>18});
+           tones.push({applied:tone.applied,geometry:geo.applied,before:tone.before,after:tone.after,contextCorrelation:geo.after,fringe:merged.changed,join:0,warning:rect.inferredEdge!==undefined||merged.warning||tone.after===null||tone.after>18});
          }finally{patch.width=patch.height=1;}
        }n+=dw*dh;
      }}finally{original.width=original.height=1;}
@@ -260,7 +260,7 @@ function presentPair(p,result){
   restoredURL=URL.createObjectURL(restoredBlob);returnedURL=URL.createObjectURL(result.alignedBlob||p.pair.file);
   $("restoredImage").src=restoredURL;$("restoredImage").hidden=false;$("restoreWaiting").hidden=true;$("returnedImage").src=returnedURL;
   $("returnPreview").hidden=false;applyCompareZoom();
-  status("恢复 "+result.n+" 像素 · "+(result.sourceLabel||"对应原图")+(result.referenceNote?" · "+result.referenceNote:"")+(result.tones?" · 窄边清理 "+result.tones.reduce((n,t)=>n+(t.fringe||0),0)+" 像素 · 接缝细线修正 "+result.tones.reduce((n,t)=>n+(t.join||0),0)+" 像素":"")+" · "+(result.localRects?"局部矩形 "+result.localRects+" 处":"全局映射（请仔细核对）")+(result.tones?" · 色调校正 "+result.tones.filter(t=>t.applied).length+" 处 · 位移校正 "+result.tones.filter(t=>t.geometry).length+" 处"+(result.tones.some(t=>t.warning)?" · 注意：部分接缝仍不可靠，须人工检查":""):"")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
+  status("恢复 "+result.n+" 像素 · "+(result.sourceLabel||"对应原图")+(result.referenceNote?" · "+result.referenceNote:"")+(result.tones?" · 窄边清理 "+result.tones.reduce((n,t)=>n+(t.fringe||0),0)+" 像素 · 接缝细线修正 "+result.tones.reduce((n,t)=>n+(t.join||0),0)+" 像素":"")+" · "+(result.localRects?"局部矩形 "+result.localRects+" 处":"全局映射（请仔细核对）")+(result.rects?.some(q=>q.inferredEdge!==undefined)?" · 存在几何估算边界，请核对接缝":"")+(result.tones?" · 色调校正 "+result.tones.filter(t=>t.applied).length+" 处 · 位移校正 "+result.tones.filter(t=>t.geometry).length+" 处"+(result.tones.some(t=>t.warning)?" · 注意：部分接缝仍不可靠，须人工检查":""):"")+" · 全局误差 "+result.median.toFixed(2)+" px；"+(pairIsApproved(p)?"已确认对应关系。":"请检查两图对应位置后确认。"));
 }
 async function showPair(p){if(!pairIsCurrent(p))return;if(p.pair.composed){presentPair(p,await composePair(p,bitmap,p.pair.file));}else{clearRestored();const b=await decode(p.pair.file);try{compareWidth=b.width;}finally{b.close();}returnedURL=URL.createObjectURL(p.pair.file);$("returnedImage").src=returnedURL;$("returnPreview").hidden=false;applyCompareZoom();status("返回图已导入："+p.pair.file.name+"。点击恢复遮盖区域。");}}
 $("restoreCurrent").onclick=()=>run(async()=>{const p=current();if(!pairIsCurrent(p))throw Error("先导入对应返回图");const result=await composePair(p,bitmap,p.pair.file);p.pair.composed=true;setPairApproval(p,false);presentPair(p,result);$("returnPreview").scrollIntoView({block:"start",behavior:"smooth"});});
