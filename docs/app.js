@@ -10,7 +10,7 @@ import {readPublicZip} from "./zip-read.mjs?v=1.0";
 import {bilingual,opposite,makeLink,linkFor,other,mappedOp,snapshot,applySnapshot,exportPlan,hasMask} from "./bilingual.mjs?v=1.0";
 import {workspaceRecord,restoreLinks,makePrivateBundle,unpackPrivateBundle,roleFromPublicName} from "./workspace.mjs?v=1.0";
 import {webpDimensions} from "./webp.mjs?v=1.0";
-import {rectanglePlan} from "./local-rect.mjs?v=1.0";
+import {rectanglePlan} from "./local-rect.mjs?v=1.0.1";
 import {matchPatchTone} from "./tone.mjs?v=1.0";
 import {alignPatchContext} from "./patch-geometry.mjs?v=1.0";
 import {restoreBoundary,preserveOutsideMask,boundaryOptions,boundedWriteMask} from "./return-boundary.mjs?v=1.0";
@@ -187,7 +187,14 @@ async function composeUsingSource(p,source,returnedFile){
        }n+=dw*dh;
      }}finally{original.width=original.height=1;}
      {
-       const projected=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
+       let projected=projectedMask(maskFor(source.width,source.height,p.ops),source.width,source.height,b.width,b.height,m);
+       const corrected=rects.filter(q=>q.calibrated);
+       if(corrected.length){
+         // Use only verified, corrected local cover cores; leave ordinary projections unchanged.
+         const other=rects.filter(q=>!q.calibrated).map(q=>({kind:"rect",a:q.src.slice(0,2),b:q.src.slice(2)}));
+         projected=maskFor(b.width,b.height,corrected.map(q=>({kind:"rect",a:q.dst.slice(0,2),b:q.dst.slice(2)})));
+         if(other.length){const rest=projectedMask(maskFor(source.width,source.height,other),source.width,source.height,b.width,b.height,m);for(let i=0;i<rest.length;i++)if(rest[i])projected[i]=1;}
+       }
        const allowed=boundedWriteMask(projected,b.width,b.height,strict?0:settings.maxHalo+settings.feather);
        const pixels=ctx.getImageData(0,0,c.width,c.height);
        const blocked=preserveOutsideMask(pixels.data,returnedPixels,allowed);

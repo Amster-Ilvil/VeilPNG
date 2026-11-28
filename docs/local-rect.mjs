@@ -21,11 +21,29 @@ export function rectanglePlan(ops,shade,sw,sh,rgba,w,h,m){
   for(let x=x0;x<=x1;x++){let n=0;for(let y=ay;y<=by;y++)if(solid(x,y))n++;cols.push(n/(by-ay+1)>=.97);}
   const yr=run(rows,Math.floor((t+b)/2)-y0),xr=run(cols,Math.floor((l+r)/2)-x0);
   if(!yr||!xr||yr[0]===0||xr[0]===0||yr[1]===rows.length-1||xr[1]===cols.length-1)return null;
-  const dst=[x0+xr[0],y0+yr[0],x0+xr[1],y0+yr[1]],dw=dst[2]-dst[0]+1,dh=dst[3]-dst[1]+1;
+  // A dark/white background touching the cover can join the loose solid run.
+  // Only shrink an inflated run when a tighter shade band agrees with the
+  // registered geometry; never extend a rectangle based on surrounding ink.
+  const tight=(x,y)=>{const i=(y*w+x)*4;return Math.max(Math.abs(rgba[i]-shade),Math.abs(rgba[i+1]-shade),Math.abs(rgba[i+2]-shade))<=8;};
+  function calibrate(lo,hi,p0,p1,origin,flags,center){
+   const span=p1-p0+1,tol=Math.max(3,Math.min(6,Math.round(span*.025)));
+   if(hi-lo+1<=span+tol)return [lo,hi];
+   const q=run(flags,center-origin);if(!q)return null;
+   const a=origin+q[0],b=origin+q[1];
+   if(a<lo||b>hi||Math.abs(a-p0)>tol||Math.abs(b-p1)>tol||Math.abs(b-a+1-span)>tol)return null;
+   return [a,b];
+  }
+  const tightCols=[],tightRows=[];
+  for(let x=x0;x<=x1;x++){let n=0;for(let y=ay;y<=by;y++)if(tight(x,y))n++;tightCols.push(n/(by-ay+1)>=.75);}
+  for(let y=y0;y<=y1;y++){let n=0;for(let x=ax;x<=bx;x++)if(tight(x,y))n++;tightRows.push(n/(bx-ax+1)>=.75);}
+  const xx=calibrate(x0+xr[0],x0+xr[1],l,r,x0,tightCols,Math.floor((l+r)/2));
+  const yy=calibrate(y0+yr[0],y0+yr[1],t,b,y0,tightRows,Math.floor((t+b)/2));
+  if(!xx||!yy)return null;
+  const dst=[xx[0],yy[0],xx[1],yy[1]],dw=dst[2]-dst[0]+1,dh=dst[3]-dst[1]+1;
   if(dw/dx<.75||dw/dx>1.25||dh/dy<.75||dh/dy>1.25)return null;
   let count=0;for(let y=dst[1];y<=dst[3];y++)for(let x=dst[0];x<=dst[2];x++)if(solid(x,y))count++;
   if(count/(dw*dh)<.98||out.some(q=>overlaps(q.dst,dst)||overlaps(q.src,src)))return null;
-  out.push({src,dst,density:count/(dw*dh)});
+  out.push({src,dst,density:count/(dw*dh),calibrated:dst[0]!==x0+xr[0]||dst[1]!==y0+yr[0]||dst[2]!==x0+xr[1]||dst[3]!==y0+yr[1]});
  }
  return out;
 }
